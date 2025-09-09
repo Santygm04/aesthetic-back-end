@@ -42,11 +42,13 @@ const ShippingSchema = new mongoose.Schema(
 
 const OrderSchema = new mongoose.Schema(
   {
-    orderNumber: { type: Number, unique: true, index: true }, // número simple incremental
+    // número simple incremental de pedido
+    orderNumber: { type: Number, unique: true, index: true },
+
     buyer: {
       nombre: String,
       email: String,
-      direccion: String, // opcional legacy
+      direccion: String, // legacy opcional
       telefono: String,
     },
     items: { type: [ItemSchema], default: [] },
@@ -59,6 +61,7 @@ const OrderSchema = new mongoose.Schema(
     paymentMethod: { type: String, enum: ["transfer", "mercadopago"], required: true },
     shippingTicket: { type: String },
     shipping: { type: ShippingSchema, default: () => ({}) },
+
     // Mercado Pago
     mp: {
       preferenceId: String,
@@ -66,6 +69,7 @@ const OrderSchema = new mongoose.Schema(
       status: String,
       status_detail: String,
     },
+
     // Transferencia
     transfer: {
       alias: String,
@@ -75,7 +79,7 @@ const OrderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Ticket + orderNumber atómico usando colección "counters"
+// Ticket de envío + asignación de orderNumber
 OrderSchema.pre("save", async function (next) {
   try {
     // shippingTicket
@@ -91,13 +95,23 @@ OrderSchema.pre("save", async function (next) {
     // orderNumber incremental (sólo al crear)
     if (this.isNew && !this.orderNumber) {
       const coll = mongoose.connection.collection("counters");
-      // Si no existe, arranca en 1000 (y luego inc => 1001)
+
+      // Importante: NO usar upsert aquí (ya lo hacemos al iniciar la app)
       const ret = await coll.findOneAndUpdate(
         { _id: "orders" },
-        { $inc: { seq: 1 }, $setOnInsert: { seq: 1000 } },
-        { upsert: true, returnDocument: "after" }
+        { $inc: { seq: 1 } },
+        { returnDocument: "after" }
       );
-      this.orderNumber = ret?.value?.seq || 1001;
+
+      // Fallback defensivo si por algún motivo no hay valor
+      let nextSeq = ret?.value?.seq;
+      if (typeof nextSeq !== "number") {
+        const doc = await coll.findOne({ _id: "orders" });
+        nextSeq = (doc?.seq ?? 0) + 1;
+        await coll.updateOne({ _id: "orders" }, { $set: { seq: nextSeq } });
+      }
+
+      this.orderNumber = nextSeq;
     }
 
     next();

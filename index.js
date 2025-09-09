@@ -113,12 +113,27 @@ try {
   console.warn("[stats-cron] not started:", e?.message || e);
 }
 
+/* ========= Helpers DB ========= */
+// Garantiza que exista el doc de contador para orderNumber
+async function ensureOrderCounter() {
+  const coll = mongoose.connection.collection("counters");
+  await coll.updateOne(
+    { _id: "orders" },
+    { $setOnInsert: { seq: 0 } },
+    { upsert: true }
+  );
+}
+
 /* ============ DB ============ */
 mongoose
   .connect(process.env.MONGO_URI)
   .then(async () => {
     console.log("✅ Conectado a MongoDB");
     console.log("DB usada:", mongoose.connection.name);
+
+    // 👇 Aseguramos el contador de órdenes
+    await ensureOrderCounter();
+
     try {
       await Promise.all([Producto.syncIndexes(), StatsDaily.syncIndexes()]);
       console.log("✅ Índices sincronizados");

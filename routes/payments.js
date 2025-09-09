@@ -127,7 +127,6 @@ function buildOrderWhatsAppText(order) {
       ? `${addr.calle || ""} ${addr.numero || ""}${addr.piso ? `, ${addr.piso}` : ""}, ${addr.ciudad || ""}, ${addr.provincia || ""} (${addr.cp || ""})`
       : "Retiro en local";
 
-  // 👇 detalle de items
   const itemsLines = (order.items || [])
     .map((it) => {
       const varPart = it?.variant?.size || it?.variant?.color
@@ -185,7 +184,6 @@ async function notifyOrderByWhatsApp(order) {
         order?.orderNumber || order?._id || null
       );
     } else {
-      // 👇 Fallback texto al comprador (incluye nro simple y resumen)
       const itemsResumen = (order.items || [])
         .map((it) => `${it.nombre} x${it.cantidad}`)
         .join(", ");
@@ -328,7 +326,7 @@ router.post("/transfer", upload.single("comprobante"), async (req, res) => {
       variant: i.variant || undefined,
     }));
 
-    let order = await Order.create({
+    const baseDoc = {
       buyer,
       items: normalizedItems,
       total,
@@ -340,7 +338,23 @@ router.post("/transfer", upload.single("comprobante"), async (req, res) => {
         address: shipping?.address || {},
       },
       status: "pending",
-    });
+    };
+
+    // 👉 create con retry SOLO si choca orderNumber (E11000)
+    let order;
+    try {
+      order = await Order.create(baseDoc);
+    } catch (err) {
+      const dupOrderNumber =
+        err?.code === 11000 &&
+        (err?.keyPattern?.orderNumber || err?.errorResponse?.keyPattern?.orderNumber);
+      if (dupOrderNumber) {
+        console.warn("[/transfer] duplicate orderNumber, retrying once…");
+        order = await Order.create(baseDoc); // el pre-save vuelve a pedir el siguiente número
+      } else {
+        throw err;
+      }
+    }
 
     if (req.file) {
       const safeName = req.file.originalname.replace(/[^a-z0-9.\-_]/gi, "_");
@@ -358,7 +372,7 @@ router.post("/transfer", upload.single("comprobante"), async (req, res) => {
       ok: true,
       orderId: order._id,
       ticket: order.shippingTicket,
-      orderNumber: order.orderNumber, // 👈 NUEVO: devolvemos nro simple
+      orderNumber: order.orderNumber, // 👈 devolvemos nro simple
     });
   } catch (e) {
     console.error("POST /transfer ERROR:", e);
@@ -370,7 +384,6 @@ router.post("/transfer", upload.single("comprobante"), async (req, res) => {
  *  Auth helper admin
  * =========================== */
 function isAdmin(req) {
-  // 1) Preferimos JWT válido con rol admin
   const hdr = req.headers["authorization"] || "";
   if (hdr.startsWith("Bearer ")) {
     try {
@@ -381,8 +394,6 @@ function isAdmin(req) {
       }
     } catch { /* ignore */ }
   }
-
-  // 2) Fallback: ADMIN_SECRET (compatibilidad con panel que envía x-admin-secret)
   const fromHeader = (req.headers["x-admin-secret"] || "").trim();
   const fromBody = (req.body?.secret || "").trim();
   const s = fromHeader || fromBody;
@@ -430,7 +441,6 @@ router.post("/order/:id/confirm", async (req, res) => {
     await notifyAdminConfirmed(o);
     broadcastOrderUpdate(o);
 
-    // 👉 link para abrir el chat de la vendedora con el pedido confirmado
     const adminLink = makeWaLink(
       ADMIN_PHONE,
       `✅ *Pago confirmado*\n\n${buildOrderWhatsAppText(o)}`
@@ -440,7 +450,7 @@ router.post("/order/:id/confirm", async (req, res) => {
       ok: true,
       id: o._id,
       status: o.status,
-      orderNumber: o.orderNumber, // 👈
+      orderNumber: o.orderNumber,
       whatsappLink: adminLink
     });
   } catch (e) {
@@ -545,7 +555,7 @@ router.get("/order/:id", async (req, res) => {
       buyer: o.buyer,
       paymentMethod: o.paymentMethod,
       shippingTicket: o.shippingTicket,
-      orderNumber: o.orderNumber, // 👈 NUEVO
+      orderNumber: o.orderNumber,
       createdAt: o.createdAt,
       mp: o.mp,
       shipping: o.shipping,
@@ -558,6 +568,7 @@ router.get("/order/:id", async (req, res) => {
 });
 
 module.exports = router;
+
 
 // // routes/payments.js
 // const express = require("express");

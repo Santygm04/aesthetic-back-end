@@ -8,7 +8,7 @@ const ItemSchema = new mongoose.Schema(
     precio: Number,
     cantidad: Number,
     subtotal: Number,
-    // 👇 NUEVO: información de la variante (opcional)
+    // info de variante (opcional)
     variant: {
       vid: String,
       size: String,
@@ -42,9 +42,7 @@ const ShippingSchema = new mongoose.Schema(
 
 const OrderSchema = new mongoose.Schema(
   {
-    // 👇 NUEVO: número simple incremental de pedido
-    orderNumber: { type: Number, unique: true, index: true },
-
+    orderNumber: { type: Number, unique: true, index: true }, // número simple incremental
     buyer: {
       nombre: String,
       email: String,
@@ -77,7 +75,7 @@ const OrderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Ticket de envío tipo AE-YYYYMMDD-#####  +  asignación de orderNumber incremental
+// Ticket + orderNumber atómico usando colección "counters"
 OrderSchema.pre("save", async function (next) {
   try {
     // shippingTicket
@@ -93,12 +91,13 @@ OrderSchema.pre("save", async function (next) {
     // orderNumber incremental (sólo al crear)
     if (this.isNew && !this.orderNumber) {
       const coll = mongoose.connection.collection("counters");
+      // Si no existe, arranca en 1000 (y luego inc => 1001)
       const ret = await coll.findOneAndUpdate(
         { _id: "orders" },
-        { $inc: { seq: 1 } },
+        { $inc: { seq: 1 }, $setOnInsert: { seq: 1000 } },
         { upsert: true, returnDocument: "after" }
       );
-      this.orderNumber = ret?.value?.seq || 1;
+      this.orderNumber = ret?.value?.seq || 1001;
     }
 
     next();

@@ -1,0 +1,110 @@
+// models/Order.js
+const mongoose = require("mongoose");
+
+const ItemSchema = new mongoose.Schema(
+  {
+    productId: { type: mongoose.Schema.Types.ObjectId, ref: "Producto" },
+    nombre: String,
+    precio: Number,
+    cantidad: Number,
+    subtotal: Number,
+    // 👇 NUEVO: información de la variante (opcional)
+    variant: {
+      vid: String,
+      size: String,
+      color: String,
+    },
+  },
+  { _id: false }
+);
+
+const AddressSchema = new mongoose.Schema(
+  {
+    calle: String,
+    numero: String,
+    piso: String,
+    ciudad: String,
+    provincia: String,
+    cp: String,
+  },
+  { _id: false }
+);
+
+const ShippingSchema = new mongoose.Schema(
+  {
+    method: { type: String, enum: ["envio", "retiro"], default: "envio" },
+    company: { type: String, default: "andreani" },
+    trackingNumber: { type: String, default: null },
+    address: { type: AddressSchema, default: {} },
+  },
+  { _id: false }
+);
+
+const OrderSchema = new mongoose.Schema(
+  {
+    // 👇 NUEVO: número simple incremental de pedido
+    orderNumber: { type: Number, unique: true, index: true },
+
+    buyer: {
+      nombre: String,
+      email: String,
+      direccion: String, // opcional legacy
+      telefono: String,
+    },
+    items: { type: [ItemSchema], default: [] },
+    total: { type: Number, required: true },
+    status: {
+      type: String,
+      enum: ["pending", "paid", "cancelled"],
+      default: "pending",
+    },
+    paymentMethod: { type: String, enum: ["transfer", "mercadopago"], required: true },
+    shippingTicket: { type: String },
+    shipping: { type: ShippingSchema, default: () => ({}) },
+    // Mercado Pago
+    mp: {
+      preferenceId: String,
+      paymentId: String,
+      status: String,
+      status_detail: String,
+    },
+    // Transferencia
+    transfer: {
+      alias: String,
+      receiptPath: String,
+    },
+  },
+  { timestamps: true }
+);
+
+// Ticket de envío tipo AE-YYYYMMDD-#####  +  asignación de orderNumber incremental
+OrderSchema.pre("save", async function (next) {
+  try {
+    // shippingTicket
+    if (!this.shippingTicket) {
+      const d = new Date();
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      const rnd = Math.floor(1000 + Math.random() * 9000);
+      this.shippingTicket = `AE-${y}${m}${day}-${rnd}`;
+    }
+
+    // orderNumber incremental (sólo al crear)
+    if (this.isNew && !this.orderNumber) {
+      const coll = mongoose.connection.collection("counters");
+      const ret = await coll.findOneAndUpdate(
+        { _id: "orders" },
+        { $inc: { seq: 1 } },
+        { upsert: true, returnDocument: "after" }
+      );
+      this.orderNumber = ret?.value?.seq || 1;
+    }
+
+    next();
+  } catch (e) {
+    next(e);
+  }
+});
+
+module.exports = mongoose.model("Order", OrderSchema);

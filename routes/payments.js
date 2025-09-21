@@ -567,554 +567,105 @@ router.get("/order/:id", async (req, res) => {
   }
 });
 
+/* =========================================================
+ *  PÚBLICO: traer varias órdenes por ids / códigos guardados
+ *  - ids: lista de ObjectId separados por coma
+ *  - codes: lista de shippingTicket (AE-...) o #orderNumber
+ * ========================================================= */
+router.get("/orders/public/by-ids", async (req, res) => {
+  try {
+    const ids = String(req.query.ids || "").split(",").map(s=>s.trim()).filter(Boolean);
+    const codes = String(req.query.codes || "").split(",").map(s=>s.trim()).filter(Boolean);
+
+    const $or = [];
+    if (ids.length) $or.push({ _id: { $in: ids } });
+
+    const tickets = codes.filter(c => /^AE-\d{8}-\d{4,}$/.test(c));
+    const numbers = codes
+      .map(c => String(c).replace(/^#/, ""))
+      .filter(c => /^\d+$/.test(c))
+      .map(n => Number(n));
+
+    if (tickets.length) $or.push({ shippingTicket: { $in: tickets } });
+    if (numbers.length) $or.push({ orderNumber: { $in: numbers } });
+
+    if (!$or.length) return res.json([]);
+
+    const list = await Order.find({ $or }).sort({ createdAt: -1 }).limit(50).lean();
+
+    const safe = list.map(o => ({
+      _id: String(o._id),
+      status: o.status,
+      paymentMethod: o.paymentMethod,
+      total: o.total,
+      shipping: o.shipping,
+      shippingTicket: o.shippingTicket,
+      orderNumber: o.orderNumber,
+      createdAt: o.createdAt,
+      items: (o.items||[]).map(it => ({
+        nombre: it.nombre, cantidad: it.cantidad, precio: it.precio, variant: it.variant
+      }))
+    }));
+
+    return res.json(safe);
+  } catch (e) {
+    console.error("GET /orders/public/by-ids error:", e);
+    res.status(500).json({ message: "Error" });
+  }
+});
+
+/* =========================================================
+ *  PÚBLICO: lookup por código (ticket AE-... o #número)
+ *  (opcional validar por email/teléfono del comprador)
+ * ========================================================= */
+router.get("/orders/public/lookup", async (req, res) => {
+  try {
+    const codeRaw = String(req.query.code || "").trim();
+    const emailOrPhone = String(req.query.emailOrPhone || "").trim();
+
+    if (!codeRaw) return res.status(400).json({ message: "Falta code" });
+
+    let q = null;
+    if (/^AE-\d{8}-\d{4,}$/i.test(codeRaw)) {
+      q = { shippingTicket: codeRaw };
+    } else {
+      const n = Number(String(codeRaw).replace(/^#/, ""));
+      if (Number.isFinite(n)) q = { orderNumber: n };
+    }
+    if (!q) return res.status(404).json({ message: "No encontrado" });
+
+    const extra = {};
+    if (emailOrPhone) {
+      const phone = (emailOrPhone.match(/\d/g) || []).join("");
+      extra.$or = [
+        { "buyer.email": new RegExp(`^${emailOrPhone}$`, "i") },
+        ...(phone ? [{ "buyer.telefono": new RegExp(phone.slice(-7)) }] : []),
+      ];
+    }
+
+    const o = await Order.findOne({ ...q, ...extra }).lean();
+    if (!o) return res.status(404).json({ message: "No encontrado" });
+
+    return res.json({
+      _id: String(o._id),
+      status: o.status,
+      paymentMethod: o.paymentMethod,
+      total: o.total,
+      shipping: o.shipping,
+      shippingTicket: o.shippingTicket,
+      orderNumber: o.orderNumber,
+      createdAt: o.createdAt,
+      items: (o.items||[]).map(it => ({
+        nombre: it.nombre, cantidad: it.cantidad, precio: it.precio, variant: it.variant
+      }))
+    });
+  } catch (e) {
+    console.error("GET /orders/public/lookup error:", e);
+    res.status(500).json({ message: "Error" });
+  }
+});
+
+
 module.exports = router;
 
 
-// // routes/payments.js
-// const express = require("express");
-// const router = express.Router();
-// const fs = require("fs");
-// const path = require("path");
-// const multer = require("multer");
-// const axios = require("axios");
-// const { MercadoPagoConfig, Preference, Payment } = require("mercadopago");
-// const Order = require("../models/Order");
-
-// /* ===========================
-//  *  Mercado Pago – setup
-//  * =========================== */
-// const MP_TOKEN = process.env.MP_ACCESS_TOKEN || "";
-// const hasToken = typeof MP_TOKEN === "string" && MP_TOKEN.trim().length > 0;
-// const tokenType = hasToken ? (MP_TOKEN.startsWith("TEST-") ? "TEST" : "PROD") : "NONE";
-// const mpClient = hasToken ? new MercadoPagoConfig({ accessToken: MP_TOKEN }) : null;
-
-// const mask = (t = "") => (t.length <= 10 ? t : `${t.slice(0, 6)}…${t.slice(-4)}`);
-// console.log(`[MP] Token: ${hasToken ? mask(MP_TOKEN) : "NO_TOKEN"} | Tipo: ${tokenType}`);
-
-// /* ===========================
-//  *  Uploads
-//  * =========================== */
-// const UP_DIR = path.join(process.cwd(), "uploads", "comprobantes");
-// fs.mkdirSync(UP_DIR, { recursive: true });
-
-// const upload = multer({
-//   dest: UP_DIR,
-//   limits: { fileSize: 10 * 1024 * 1024 },
-// });
-
-// /* ===========================
-//  *  WhatsApp helpers
-//  * =========================== */
-// const WSP_TOKEN = process.env.WHATSAPP_TOKEN || "";
-// const WSP_PHONE_ID = process.env.WHATSAPP_PHONE_ID || "";
-// const ADMIN_PHONE = (process.env.ADMIN_PHONE || "").replace(/\D/g, "");
-// const NOTIFY_BUYER = String(process.env.WHATSAPP_NOTIFY_BUYER || "false").toLowerCase() === "true";
-// const DEFAULT_CC = process.env.DEFAULT_COUNTRY_CODE || ""; // ej "54"
-
-// /** Normaliza un número a dígitos con país. */
-// function normalizePhone(raw) {
-//   if (!raw) return null;
-//   let digits = String(raw).replace(/\D/g, "");
-//   // Si ya viene con país (11+ dígitos), lo dejamos
-//   if (digits.length >= 11) return digits;
-//   // Si no, y tenemos default CC, lo anteponemos
-//   if (DEFAULT_CC && digits) return `${DEFAULT_CC}${digits}`;
-//   return digits || null;
-// }
-
-// /** Envía un WhatsApp (texto) a un teléfono dado. */
-// async function sendWhatsAppTo(phoneDigits, text) {
-//   const to = (phoneDigits || "").replace(/\D/g, "");
-//   if (!WSP_TOKEN || !WSP_PHONE_ID || !to) return false;
-
-//   const url = `https://graph.facebook.com/v17.0/${WSP_PHONE_ID}/messages`;
-//   try {
-//     await axios.post(
-//       url,
-//       {
-//         messaging_product: "whatsapp",
-//         to: to,
-//         type: "text",
-//         text: { body: text },
-//       },
-//       { headers: { Authorization: `Bearer ${WSP_TOKEN}` } }
-//     );
-//     return true;
-//   } catch (e) {
-//     console.warn("WhatsApp API error:", e?.response?.data || e.message);
-//     return false;
-//   }
-// }
-
-// /** Crea un link wa.me para abrir el chat manualmente. */
-// function makeWaLink(phoneDigits, text) {
-//   if (!phoneDigits) return null;
-//   const d = phoneDigits.replace(/\D/g, "");
-//   const msg = encodeURIComponent(text || "");
-//   return `https://wa.me/${d}?text=${msg}`;
-// }
-
-// /** Formatea ARS simple. */
-// function ars(n) {
-//   try {
-//     return new Intl.NumberFormat("es-AR", {
-//       style: "currency",
-//       currency: "ARS",
-//       maximumFractionDigits: 0,
-//     }).format(Number(n || 0));
-//   } catch {
-//     return `$${Number(n || 0)}`;
-//   }
-// }
-
-// /** Arma el texto del pedido para WhatsApp. */
-// function buildOrderWhatsAppText(order) {
-//   const b = order?.buyer || {};
-//   const sh = order?.shipping || {};
-//   const addr = sh.address || {};
-//   const lineDir = sh.method === "envio"
-//     ? `${addr.calle || ""} ${addr.numero || ""}${addr.piso ? `, ${addr.piso}` : ""}, ${addr.ciudad || ""}, ${addr.provincia || ""} (${addr.cp || ""})`
-//     : "Retiro en local";
-
-//   const items = (order.items || [])
-//     .map(it => `• ${it.nombre} x${it.cantidad} — ${ars(it.subtotal)}`)
-//     .join("\n");
-
-//   const lines = [
-//     `🧾 *Nuevo pedido AESTHETIC*`,
-//     "",
-//     `*Ticket:* ${order.shippingTicket}`,
-//     `*Pedido:* ${order._id}`,
-//     `*Estado:* ${order.status}`,
-//     `*Pago:* ${order.paymentMethod === "mercadopago" ? "Mercado Pago" : order.paymentMethod}`,
-//     "",
-//     `*Cliente:* ${b.nombre || "-"}`,
-//     `*Tel:* ${b.telefono || "-"}`,
-//     `*Email:* ${b.email || "-"}`,
-//     "",
-//     `*Entrega:* ${sh.method === "envio" ? "Envío a domicilio" : "Retiro en local"}`,
-//     `*Dirección:* ${lineDir}`,
-//     "",
-//     `*Productos:*`,
-//     items || "-",
-//     "",
-//     `*Total:* ${ars(order.total)}`,
-//   ];
-
-//   return lines.join("\n");
-// }
-
-// /** Envía las notificaciones de WhatsApp (admin y opcionalmente comprador) para un pedido. */
-// async function notifyOrderByWhatsApp(order) {
-//   try {
-//     const text = buildOrderWhatsAppText(order);
-
-//     // 1) Admin SIEMPRE
-//     if (ADMIN_PHONE) {
-//       const okAdmin = await sendWhatsAppTo(ADMIN_PHONE, text);
-//       if (!okAdmin) console.warn("No se pudo notificar por WhatsApp al admin.");
-//     }
-
-//     // 2) Comprador (opcional, requiere políticas de WhatsApp; ideal usar template)
-//     if (NOTIFY_BUYER && order?.buyer?.telefono) {
-//       const buyerDigits = normalizePhone(order.buyer.telefono);
-//       if (buyerDigits) {
-//         const okBuyer = await sendWhatsAppTo(buyerDigits, text);
-//         if (!okBuyer) console.warn("No se pudo notificar por WhatsApp al comprador.");
-//       }
-//     }
-
-//     // Fallback link por si querés mostrar un botón "Abrir WhatsApp"
-//     const link = ADMIN_PHONE ? makeWaLink(ADMIN_PHONE, text) : null;
-//     return link;
-//   } catch (e) {
-//     console.warn("notifyOrderByWhatsApp error:", e?.message || e);
-//     return null;
-//   }
-// }
-
-// /* ===========================
-//  *  Base del FRONT
-//  * =========================== */
-// function resolveFrontBase(req) {
-//   const envFront = (process.env.FRONT_URL || process.env.FRONT_ORIGIN || "").trim();
-//   const fromHeader = (req.headers.origin || req.headers.referer || "").trim();
-//   const candidate = envFront || fromHeader || "http://localhost:5173";
-//   try {
-//     const u = new URL(candidate);
-//     return `${u.protocol}//${u.host}`;
-//   } catch {
-//     return "http://localhost:5173";
-//   }
-// }
-
-// /* ===== DEBUG ===== */
-// router.get("/debug", (req, res) => {
-//   return res.json({
-//     ok: true,
-//     hasToken,
-//     tokenType,
-//     maskedToken: hasToken ? mask(MP_TOKEN) : null,
-//     resolvedFrontBase: resolveFrontBase(req),
-//   });
-// });
-
-// /* ========== MP helper: payment_method_id desde token (BIN) ========== */
-// async function resolvePaymentMethodIdFromToken(token) {
-//   try {
-//     if (!token) return null;
-
-//     const tRes = await axios.get(
-//       `https://api.mercadopago.com/v1/card_tokens/${encodeURIComponent(token)}`,
-//       { headers: { Authorization: `Bearer ${MP_TOKEN}` } }
-//     );
-//     const firstSix =
-//       tRes?.data?.first_six_digits ||
-//       tRes?.data?.bin ||
-//       (tRes?.data?.card_number_id ? String(tRes.data.card_number_id).slice(0, 6) : null);
-
-//     if (!firstSix) return null;
-
-//     const pmRes = await axios.get(
-//       `https://api.mercadopago.com/v1/payment_methods/search?bin=${firstSix}`,
-//       { headers: { Authorization: `Bearer ${MP_TOKEN}` } }
-//     );
-
-//     const r = pmRes?.data;
-//     const id =
-//       r?.results?.[0]?.id ||
-//       r?.payment_methods?.[0]?.id ||
-//       r?.[0]?.id ||
-//       null;
-
-//     return id || null;
-//   } catch (e) {
-//     console.warn("resolvePaymentMethodIdFromToken error:", e?.response?.data || e.message);
-//     return null;
-//   }
-// }
-
-// /* ===========================
-//  *  PAGOS CON TARJETA (Bricks)
-//  * =========================== */
-// router.post("/mp/pay-card", async (req, res) => {
-//   try {
-//     if (!mpClient) {
-//       return res.status(400).json({
-//         message: "Mercado Pago no está configurado.",
-//         error: "Falta MP_ACCESS_TOKEN en el backend (.env)",
-//       });
-//     }
-
-//     const { total = 0, buyer = {}, shipping = {}, items = [], card = {} } = req.body || {};
-//     if (!card?.token) {
-//       return res.status(400).json({ message: "Falta token de tarjeta" });
-//     }
-
-//     // 1) Orden pending
-//     const normalizedItems = (items || []).map((i) => ({
-//       nombre: i.nombre || i.title || "Producto",
-//       precio: Number(i.precio || i.unit_price || 0),
-//       cantidad: Number(i.cantidad || i.quantity || 1),
-//       subtotal: Number(i.precio || i.unit_price || 0) * Number(i.cantidad || i.quantity || 1),
-//     }));
-
-//     const order = await Order.create({
-//       buyer,
-//       items: normalizedItems,
-//       total: Number(total),
-//       paymentMethod: "mercadopago",
-//       shipping: {
-//         method: shipping?.method || "envio",
-//         company: "andreani",
-//         address: shipping?.address || {},
-//       },
-//       status: "pending",
-//     });
-
-//     // 2) Resolver método de pago si no vino
-//     let paymentMethodId = card.payment_method_id || null;
-//     if (!paymentMethodId) {
-//       paymentMethodId = await resolvePaymentMethodIdFromToken(card.token);
-//     }
-
-//     // 3) Crear pago MP
-//     const payment = new Payment(mpClient);
-//     const body = {
-//       transaction_amount: Number(total),
-//       token: card.token,
-//       installments: Number(card.installments || 1),
-//       payment_method_id: paymentMethodId || undefined,
-//       issuer_id: card.issuer_id ? String(card.issuer_id) : undefined,
-//       description: "Compra en AESTHETIC",
-//       binary_mode: true,
-//       payer: {
-//         email: (card?.payer?.email || buyer?.email || "").trim() || undefined,
-//         identification: card?.payer?.identification || undefined,
-//       },
-//       external_reference: String(order._id),
-//     };
-
-//     const mpRes = await payment.create({ body });
-//     const status = mpRes?.status || mpRes?.body?.status || "pending"; // approved | rejected | in_process
-//     const idPago = mpRes?.id || mpRes?.body?.id;
-
-//     await Order.findByIdAndUpdate(order._id, {
-//       status: status === "approved" ? "paid" : status,
-//       "mp.paymentId": String(idPago || ""),
-//       "mp.status": status,
-//     });
-
-//     // WhatsApp si quedó pagado
-//     let whatsappLink = null;
-//     if (status === "approved") {
-//       const fresh = await Order.findById(order._id).lean();
-//       whatsappLink = await notifyOrderByWhatsApp(fresh);
-//     }
-
-//     return res.json({
-//       ok: true,
-//       orderId: order._id,
-//       status,
-//       paymentId: idPago,
-//       ticket: order.shippingTicket,
-//       whatsappLink, // por si querés mostrar un botón "Abrir WhatsApp"
-//     });
-//   } catch (e) {
-//     const apiErr = e?.response?.data || e?.message || e;
-//     console.error("POST /mp/pay-card ERROR:", apiErr);
-
-//     let message = "No se pudo procesar el pago con tarjeta";
-//     const txt = JSON.stringify(apiErr).toLowerCase();
-//     if (txt.includes("payment_method_id")) {
-//       message = "No pudimos identificar la tarjeta. Reingresá los primeros dígitos.";
-//     }
-//     if (txt.includes("identification")) {
-//       message = "Falta el documento del titular. Completalo y probá de nuevo.";
-//     }
-
-//     return res.status(500).json({ message, error: apiErr });
-//   }
-// });
-
-// /* ===========================
-//  *  TRANSFERENCIA
-//  * =========================== */
-// router.post("/transfer", upload.single("comprobante"), async (req, res) => {
-//   try {
-//     const total = Number(req.body.total || 0);
-//     const buyer = JSON.parse(req.body.buyer || "{}");
-//     const items = JSON.parse(req.body.items || "[]");
-//     const alias = String(req.body.alias || "").trim();
-//     const shipping = JSON.parse(req.body.shipping || "{}");
-
-//     const normalizedItems = items.map((i) => ({
-//       productId: i.productId || undefined,
-//       nombre: i.nombre,
-//       precio: Number(i.precio),
-//       cantidad: Number(i.cantidad || 1),
-//       subtotal: Number(i.precio) * Number(i.cantidad || 1),
-//     }));
-
-//     let order = await Order.create({
-//       buyer,
-//       items: normalizedItems,
-//       total,
-//       paymentMethod: "transfer",
-//       transfer: { alias, receiptPath: null },
-//       shipping: {
-//         method: shipping?.method || "envio",
-//         company: "andreani",
-//         address: shipping?.address || {},
-//       },
-//       status: "pending",
-//     });
-
-//     if (req.file) {
-//       const safeName = req.file.originalname.replace(/[^a-z0-9.\-_]/gi, "_");
-//       const finalRel = path.join("uploads", "comprobantes", `${order._id}-${safeName}`);
-//       const finalAbs = path.join(process.cwd(), finalRel);
-//       fs.renameSync(req.file.path, finalAbs);
-//       order.transfer.receiptPath = `/${finalRel}`;
-//       await order.save();
-//     }
-
-//     // Notificación WhatsApp (transferencia es pending; avisamos al admin para revisar)
-//     const text =
-//       `🧾 *Nueva transferencia recibida*\n\n` +
-//       `*Ticket:* ${order.shippingTicket}\n` +
-//       `*Pedido:* ${order._id}\n` +
-//       `*Cliente:* ${buyer.nombre} | ${buyer.telefono}\n` +
-//       `*Email:* ${buyer.email}\n` +
-//       `*Total:* ${ars(total)}\n` +
-//       `*Alias:* ${alias}\n` +
-//       `Estado: pending (revisar comprobante)`;
-//     if (ADMIN_PHONE) await sendWhatsAppTo(ADMIN_PHONE, text);
-
-//     const fallbackLink = ADMIN_PHONE ? makeWaLink(ADMIN_PHONE, text) : null;
-
-//     res.json({
-//       ok: true,
-//       orderId: order._id,
-//       ticket: order.shippingTicket,
-//       whatsappLink: fallbackLink,
-//     });
-//   } catch (e) {
-//     console.error("POST /transfer ERROR:", e);
-//     res.status(500).json({ message: "Error al registrar transferencia" });
-//   }
-// });
-
-// /* ===========================
-//  *  MP: Crear preferencia (Checkout Pro)
-//  * =========================== */
-// router.post("/mp/create-preference", async (req, res) => {
-//   try {
-//     if (!mpClient) {
-//       return res.status(400).json({
-//         message: "Mercado Pago no está configurado.",
-//         error: "Falta MP_ACCESS_TOKEN en el backend (.env)",
-//       });
-//     }
-
-//     const { items = [], total = 0, buyer = {}, shipping = {} } = req.body || {};
-
-//     const normalizedItems = (items || []).map((i) => ({
-//       title: i.title,
-//       quantity: Number(i.quantity || 1),
-//       unit_price: Number(i.unit_price),
-//       currency_id: "ARS",
-//     }));
-
-//     const order = await Order.create({
-//       buyer,
-//       items: normalizedItems.map((i) => ({
-//         nombre: i.title,
-//         precio: i.unit_price,
-//         cantidad: i.quantity,
-//         subtotal: i.unit_price * i.quantity,
-//       })),
-//       total: Number(total),
-//       paymentMethod: "mercadopago",
-//       shipping: {
-//         method: shipping?.method || "envio",
-//         company: "andreani",
-//         address: shipping?.address || {},
-//       },
-//       status: "pending",
-//     });
-
-//     const frontBase = resolveFrontBase(req);
-//     const back_urls = {
-//       success: `${frontBase}/pago/exito?o=${order._id}`,
-//       failure: `${frontBase}/pago/error?o=${order._id}`,
-//       pending: `${frontBase}/pago/pending?o=${order._id}`,
-//     };
-//     console.log("[MP] back_urls:", back_urls);
-
-//     const preference = new Preference(mpClient);
-//     const pref = await preference.create({
-//       body: {
-//         items: normalizedItems,
-//         payer: { name: buyer?.nombre, email: buyer?.email },
-//         back_urls,
-//         ...(process.env.PUBLIC_URL
-//           ? { notification_url: `${process.env.PUBLIC_URL}/api/payments/mp/webhook` }
-//           : {}),
-//         external_reference: String(order._id),
-//       },
-//     });
-
-//     const prefId = pref?.id || pref?.body?.id || null;
-//     const initPoint =
-//       pref?.init_point ||
-//       pref?.sandbox_init_point ||
-//       pref?.body?.init_point ||
-//       pref?.body?.sandbox_init_point ||
-//       null;
-
-//     order.mp = { preferenceId: String(prefId || "") };
-//     await order.save();
-
-//     if (!initPoint) {
-//       return res.status(500).json({
-//         message: "Preferencia creada sin URL de inicio",
-//         error: "Falta init_point/sandbox_init_point en la respuesta",
-//         preferenceId: prefId,
-//       });
-//     }
-
-//     res.json({
-//       init_point: initPoint,
-//       preferenceId: prefId,
-//       orderId: order._id,
-//       ticket: order.shippingTicket,
-//     });
-//   } catch (e) {
-//     const details = e?.response?.data || e?.message || e;
-//     console.error("POST /mp/create-preference ERROR:", details);
-//     res.status(500).json({ message: "No se pudo crear la preferencia", error: details });
-//   }
-// });
-
-// /* ===========================
-//  *  MP: Webhook (cambios de estado)
-//  * =========================== */
-// router.post("/mp/webhook", async (req, res) => {
-//   try {
-//     if (!mpClient) return res.sendStatus(200);
-
-//     const paymentId = req.query["data.id"] || req.body?.data?.id;
-//     if (paymentId) {
-//       const p = new Payment(mpClient);
-//       const info = await p.get({ id: paymentId });
-//       const status = info?.status || info?.body?.status;
-//       const orderId = info?.external_reference || info?.body?.external_reference;
-
-//       if (orderId) {
-//         await Order.findByIdAndUpdate(orderId, {
-//           status: status === "approved" ? "paid" : status,
-//           "mp.paymentId": String(paymentId),
-//           "mp.status": status,
-//         });
-
-//         // Si quedó pagado por webhook, avisamos por WhatsApp
-//         if (status === "approved") {
-//           const fresh = await Order.findById(orderId).lean();
-//           await notifyOrderByWhatsApp(fresh);
-//         }
-//       }
-//     }
-//     res.sendStatus(200);
-//   } catch (e) {
-//     console.error("MP webhook error:", e?.response?.data || e.message || e);
-//     res.sendStatus(200);
-//   }
-// });
-
-// /* ===========================
-//  *  Obtener orden
-//  * =========================== */
-// router.get("/order/:id", async (req, res) => {
-//   try {
-//     const o = await Order.findById(req.params.id).lean();
-//     if (!o) return res.status(404).json({ message: "No encontrado" });
-//     return res.json({
-//       id: o._id,
-//       status: o.status,
-//       total: o.total,
-//       buyer: o.buyer,
-//       paymentMethod: o.paymentMethod,
-//       shippingTicket: o.shippingTicket,
-//       createdAt: o.createdAt,
-//       mp: o.mp,
-//       shipping: o.shipping,
-//       transfer: o.transfer,
-//     });
-//   } catch (e) {
-//     console.error("GET /order/:id ERROR:", e);
-//     res.status(500).json({ message: "Error al obtener orden" });
-//   }
-// });
-
-// module.exports = router;

@@ -391,6 +391,68 @@ router.get("/search", async (req, res) => {
 });
 
 // -------------------------
+// SUGERENCIAS (para autocomplete)
+// -------------------------
+router.get("/suggest", async (req, res) => {
+  try {
+    const q = String(req.query.q || "").trim();
+    const limit = Math.max(1, Math.min(50, toInt(req.query.limit, 8)));
+    if (!q) return res.json([]);
+
+    // 1) Intento con índice de texto si existe
+    let out = [];
+    const set = new Set();
+    try {
+      const textFilter = withVis(req, { $text: { $search: q } });
+      const docs = await Producto.find(
+        textFilter,
+        { score: { $meta: "textScore" }, nombre: 1 }
+      )
+        .sort({ score: { $meta: "textScore" } })
+        .limit(limit * 3)
+        .lean();
+
+      for (const d of docs) {
+        const s = d?.nombre?.trim();
+        if (s && !set.has(s.toLowerCase())) {
+          set.add(s.toLowerCase());
+          out.push(s);
+          if (out.length >= limit) break;
+        }
+      }
+    } catch (_) {
+      // sin índice de texto o error -> uso regex
+    }
+
+    // 2) Fallback regex si faltan resultados
+    if (out.length < limit) {
+      const esc = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(esc(q), "i");
+      const docs2 = await Producto.find(
+        withVis(req, { nombre: re }),
+        { nombre: 1 }
+      )
+        .limit(limit * 3)
+        .lean();
+
+      for (const d of docs2) {
+        const s = d?.nombre?.trim();
+        if (s && !set.has(s.toLowerCase())) {
+          set.add(s.toLowerCase());
+          out.push(s);
+          if (out.length >= limit) break;
+        }
+      }
+    }
+
+    return res.json(out.slice(0, limit));
+  } catch (e) {
+    console.error("GET /suggest ERROR:", e);
+    return res.json([]);
+  }
+});
+
+// -------------------------
 // LISTADO GENERAL (array plano)
 // -------------------------
 router.get("/", async (req, res) => {

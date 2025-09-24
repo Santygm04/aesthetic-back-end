@@ -275,7 +275,13 @@ function broadcastOrderUpdate(order) {
   const listeners = streamsByOrder.get(key);
   if (listeners && listeners.length) {
     listeners.forEach((r) =>
-      sseWrite(r, "update", { id: order._id, status: order.status })
+      sseWrite(r, "update", {
+        id: order._id,
+        status: order.status,
+        shipping: order.shipping || null,
+        shippedAt: order.shippedAt || null,
+        deliveredAt: order.deliveredAt || null,
+      })
     );
   }
 }
@@ -292,7 +298,13 @@ router.get("/order/:id/stream", async (req, res) => {
 
   try {
     const o = await Order.findById(key).lean();
-    if (o) sseWrite(res, "update", { id: o._id, status: o.status });
+    if (o) sseWrite(res, "update", {
+      id: o._id,
+      status: o.status,
+      shipping: o.shipping || null,
+      shippedAt: o.shippedAt || null,
+      deliveredAt: o.deliveredAt || null,
+    });
   } catch {}
 
   const keep = setInterval(() => res.write(":\n\n"), 25000);
@@ -480,6 +492,69 @@ async function cancelHandler(req, res) {
 router.post("/order/:id/cancel", cancelHandler);
 router.post("/order/:id/reject", cancelHandler);
 
+/* ===========================
+ *  Despachar (ADMIN)
+ *  - Body: { trackingNumber?, company?, method? }
+ * =========================== */
+router.post("/order/:id/ship", async (req, res) => {
+  try {
+    if (!isAdmin(req)) return res.status(401).json({ message: "No autorizado" });
+
+    const { trackingNumber, company, method } = req.body || {};
+    const o = await Order.findById(req.params.id);
+    if (!o) return res.status(404).json({ message: "No encontrado" });
+
+    // actualizar shipping
+    if (o.shipping == null) o.shipping = {};
+    if (trackingNumber !== undefined) o.shipping.trackingNumber = String(trackingNumber || "");
+    if (company !== undefined) o.shipping.company = String(company || "");
+    if (method === "envio" || method === "retiro") o.shipping.method = method;
+
+    o.shippedAt = new Date();
+    await o.save();
+
+    broadcastOrderUpdate(o);
+    return res.json({
+      ok: true,
+      id: o._id,
+      status: o.status,
+      orderNumber: o.orderNumber,
+      shipping: o.shipping,
+      shippedAt: o.shippedAt,
+    });
+  } catch (e) {
+    console.error("ship order error:", e);
+    res.status(500).json({ message: "Error al despachar" });
+  }
+});
+
+/* ===========================
+ *  Marcar Entregado (ADMIN)
+ * =========================== */
+router.post("/order/:id/deliver", async (req, res) => {
+  try {
+    if (!isAdmin(req)) return res.status(401).json({ message: "No autorizado" });
+
+    const o = await Order.findById(req.params.id);
+    if (!o) return res.status(404).json({ message: "No encontrado" });
+
+    o.deliveredAt = new Date();
+    await o.save();
+
+    broadcastOrderUpdate(o);
+    return res.json({
+      ok: true,
+      id: o._id,
+      status: o.status,
+      orderNumber: o.orderNumber,
+      deliveredAt: o.deliveredAt,
+    });
+  } catch (e) {
+    console.error("deliver order error:", e);
+    res.status(500).json({ message: "Error al marcar entregado" });
+  }
+});
+
 /* =========================================================
  *  WEBHOOK para auto-confirmar transferencias
  * ========================================================= */
@@ -560,6 +635,8 @@ router.get("/order/:id", async (req, res) => {
       mp: o.mp,
       shipping: o.shipping,
       transfer: o.transfer,
+      shippedAt: o.shippedAt || null,
+      deliveredAt: o.deliveredAt || null,
     });
   } catch (e) {
     console.error("GET /order/:id ERROR:", e);
@@ -602,6 +679,8 @@ router.get("/orders/public/by-ids", async (req, res) => {
       shippingTicket: o.shippingTicket,
       orderNumber: o.orderNumber,
       createdAt: o.createdAt,
+      shippedAt: o.shippedAt || null,
+      deliveredAt: o.deliveredAt || null,
       items: (o.items||[]).map(it => ({
         nombre: it.nombre, cantidad: it.cantidad, precio: it.precio, variant: it.variant
       }))
@@ -655,6 +734,8 @@ router.get("/orders/public/lookup", async (req, res) => {
       shippingTicket: o.shippingTicket,
       orderNumber: o.orderNumber,
       createdAt: o.createdAt,
+      shippedAt: o.shippedAt || null,
+      deliveredAt: o.deliveredAt || null,
       items: (o.items||[]).map(it => ({
         nombre: it.nombre, cantidad: it.cantidad, precio: it.precio, variant: it.variant
       }))
@@ -665,7 +746,4 @@ router.get("/orders/public/lookup", async (req, res) => {
   }
 });
 
-
 module.exports = router;
-
-

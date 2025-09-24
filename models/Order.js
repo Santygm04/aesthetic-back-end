@@ -62,6 +62,10 @@ const OrderSchema = new mongoose.Schema(
     shippingTicket: { type: String },
     shipping: { type: ShippingSchema, default: () => ({}) },
 
+    // marcas de logística
+    shippedAt: { type: Date, default: null },     // 👈 NUEVO
+    deliveredAt: { type: Date, default: null },   // 👈 NUEVO
+
     // Mercado Pago
     mp: {
       preferenceId: String,

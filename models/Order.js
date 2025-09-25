@@ -35,8 +35,10 @@ const ShippingSchema = new mongoose.Schema(
     method: { type: String, enum: ["envio", "retiro"], default: "envio" },
     company: { type: String, default: "andreani" },
     trackingNumber: { type: String, default: null },
-    deliveredAt: { type: Date, default: null }, // 👈 NUEVO: marcar entrega final
     address: { type: AddressSchema, default: {} },
+    // 👇 NUEVO: timestamps simples de logística
+    shippedAt: { type: Date, default: null },
+    deliveredAt: { type: Date, default: null },
   },
   { _id: false }
 );

@@ -33,7 +33,7 @@ const WSP_TEMPLATE_LANG = process.env.WHATSAPP_TEMPLATE_LANG || "es_AR";
 
 // Admin / Webhook secrets
 const ADMIN_SECRET = process.env.ADMIN_SECRET || "";
-const BANK_WEBHOOK_SECRET = process.env.BANK_WEBHOOK_SECRET || "";
+const BANK_WEBHOOK_SECRET = process.envBANK_WEBHOOK_SECRET || process.env.BANK_WEBHOOK_SECRET || "";
 const JWT_SECRET = process.env.JWT_SECRET || "cambia-esto"; // 👈 NUEVO
 
 /* ============ utils ============ */
@@ -265,6 +265,7 @@ router.get("/debug", (req, res) => {
  * ========================================================= */
 const streamsByOrder = new Map(); // orderId -> [res, res, ...]
 
+// helper SSE
 function sseWrite(res, event, payload) {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
@@ -274,13 +275,9 @@ function broadcastOrderUpdate(order) {
   const key = String(order._id);
   const listeners = streamsByOrder.get(key);
   if (listeners && listeners.length) {
-    // 👇 ahora también mandamos shipping para que el front vea “Despachado / Entrega”
-    const snap = {
-      id: order._id,
-      status: order.status,
-      shipping: order.shipping || null,
-    };
-    listeners.forEach((r) => sseWrite(r, "update", snap));
+    listeners.forEach((r) =>
+      sseWrite(r, "update", { id: order._id, status: order.status })
+    );
   }
 }
 
@@ -296,7 +293,7 @@ router.get("/order/:id/stream", async (req, res) => {
 
   try {
     const o = await Order.findById(key).lean();
-    if (o) sseWrite(res, "update", { id: o._id, status: o.status, shipping: o.shipping || null });
+    if (o) sseWrite(res, "update", { id: o._id, status: o.status });
   } catch {}
 
   const keep = setInterval(() => res.write(":\n\n"), 25000);
@@ -484,9 +481,10 @@ async function cancelHandler(req, res) {
 router.post("/order/:id/cancel", cancelHandler);
 router.post("/order/:id/reject", cancelHandler);
 
-/* ===========================
- *  NUEVO: marcar DESPACHADO (ADMIN)
- * =========================== */
+/* =========================================================
+ *  NUEVO: Logística simple (despacho/entrega)
+ * ========================================================= */
+// Despachar (tracking/empresa opcionales)
 router.post("/order/:id/ship", async (req, res) => {
   try {
     if (!isAdmin(req)) return res.status(401).json({ message: "No autorizado" });
@@ -495,99 +493,33 @@ router.post("/order/:id/ship", async (req, res) => {
     const o = await Order.findById(req.params.id);
     if (!o) return res.status(404).json({ message: "No encontrado" });
 
-    if (trackingNumber) o.shipping.trackingNumber = String(trackingNumber).trim();
+    if (method === "envio" || method === "retiro") o.shipping.method = method;
     if (company) o.shipping.company = String(company).trim();
-    if (method && (method === "envio" || method === "retiro")) o.shipping.method = method;
+    if (trackingNumber) o.shipping.trackingNumber = String(trackingNumber).trim();
+    o.shipping.shippedAt = new Date();
 
     await o.save();
-    broadcastOrderUpdate(o);
-    return res.json({ ok: true, id: o._id, status: o.status, shipping: o.shipping });
+    return res.json({ ok: true, id: o._id, shipping: o.shipping });
   } catch (e) {
     console.error("ship order error:", e);
     res.status(500).json({ message: "Error al marcar despachado" });
   }
 });
 
-/* ===========================
- *  NUEVO: marcar ENTREGADO (ADMIN)
- * =========================== */
+// Entregado
 router.post("/order/:id/delivered", async (req, res) => {
   try {
     if (!isAdmin(req)) return res.status(401).json({ message: "No autorizado" });
 
-    const o = await Order.findByIdAndUpdate(
-      req.params.id,
-      { "shipping.deliveredAt": new Date() },
-      { new: true }
-    );
+    const o = await Order.findById(req.params.id);
     if (!o) return res.status(404).json({ message: "No encontrado" });
 
-    broadcastOrderUpdate(o);
-    return res.json({ ok: true, id: o._id, status: o.status, shipping: o.shipping });
+    o.shipping.deliveredAt = new Date();
+    await o.save();
+    return res.json({ ok: true, id: o._id, shipping: o.shipping });
   } catch (e) {
     console.error("delivered order error:", e);
     res.status(500).json({ message: "Error al marcar entregado" });
-  }
-});
-
-/* =========================================================
- *  WEBHOOK para auto-confirmar transferencias
- * ========================================================= */
-router.post("/transfer/webhook", async (req, res) => {
-  try {
-    const secret = String(req.body?.secret || "");
-    if (!BANK_WEBHOOK_SECRET || secret !== BANK_WEBHOOK_SECRET) {
-      return res.status(401).json({ message: "No autorizado" });
-    }
-
-    const amount = Number(req.body?.amount || 0);
-    const alias = String(req.body?.alias || "").trim().toUpperCase();
-    const ticket = String(req.body?.ticket || "").trim();
-    const buyerPhone = normalizePhone(req.body?.buyerPhone || "");
-
-    if (!amount) return res.status(400).json({ message: "Falta amount" });
-
-    let o = null;
-    if (ticket) {
-      o = await Order.findOne({
-        shippingTicket: ticket,
-        paymentMethod: "transfer",
-        status: "pending",
-      });
-    }
-
-    if (!o) {
-      const since = new Date(Date.now() - 72 * 60 * 60 * 1000);
-      const q = {
-        status: "pending",
-        paymentMethod: "transfer",
-        createdAt: { $gte: since },
-        total: amount,
-      };
-      if (alias) q["transfer.alias"] = new RegExp(`^${alias}$`, "i");
-      const candidates = await Order.find(q).sort({ createdAt: -1 }).limit(5);
-      if (candidates.length === 1) {
-        o = candidates[0];
-      } else if (!o && candidates.length > 1 && buyerPhone) {
-        o = candidates.find((c) => normalizePhone(c?.buyer?.telefono) === buyerPhone) || null;
-      }
-    }
-
-    if (!o) {
-      return res.status(404).json({ message: "No se encontró orden pendiente que coincida" });
-    }
-
-    o.status = "paid";
-    await o.save();
-
-    await notifyBuyerConfirmed(o);
-    await notifyAdminConfirmed(o);
-    broadcastOrderUpdate(o);
-
-    return res.json({ ok: true, id: o._id, status: o.status, orderNumber: o.orderNumber });
-  } catch (e) {
-    console.error("transfer webhook error:", e);
-    res.status(500).json({ message: "Error al procesar webhook" });
   }
 });
 

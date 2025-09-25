@@ -274,15 +274,13 @@ function broadcastOrderUpdate(order) {
   const key = String(order._id);
   const listeners = streamsByOrder.get(key);
   if (listeners && listeners.length) {
-    listeners.forEach((r) =>
-      sseWrite(r, "update", {
-        id: order._id,
-        status: order.status,
-        shipping: order.shipping || null,
-        shippedAt: order.shippedAt || null,
-        deliveredAt: order.deliveredAt || null,
-      })
-    );
+    // 👇 ahora también mandamos shipping para que el front vea “Despachado / Entrega”
+    const snap = {
+      id: order._id,
+      status: order.status,
+      shipping: order.shipping || null,
+    };
+    listeners.forEach((r) => sseWrite(r, "update", snap));
   }
 }
 
@@ -298,13 +296,7 @@ router.get("/order/:id/stream", async (req, res) => {
 
   try {
     const o = await Order.findById(key).lean();
-    if (o) sseWrite(res, "update", {
-      id: o._id,
-      status: o.status,
-      shipping: o.shipping || null,
-      shippedAt: o.shippedAt || null,
-      deliveredAt: o.deliveredAt || null,
-    });
+    if (o) sseWrite(res, "update", { id: o._id, status: o.status, shipping: o.shipping || null });
   } catch {}
 
   const keep = setInterval(() => res.write(":\n\n"), 25000);
@@ -493,8 +485,7 @@ router.post("/order/:id/cancel", cancelHandler);
 router.post("/order/:id/reject", cancelHandler);
 
 /* ===========================
- *  Despachar (ADMIN)
- *  - Body: { trackingNumber?, company?, method? }
+ *  NUEVO: marcar DESPACHADO (ADMIN)
  * =========================== */
 router.post("/order/:id/ship", async (req, res) => {
   try {
@@ -504,53 +495,37 @@ router.post("/order/:id/ship", async (req, res) => {
     const o = await Order.findById(req.params.id);
     if (!o) return res.status(404).json({ message: "No encontrado" });
 
-    // actualizar shipping
-    if (o.shipping == null) o.shipping = {};
-    if (trackingNumber !== undefined) o.shipping.trackingNumber = String(trackingNumber || "");
-    if (company !== undefined) o.shipping.company = String(company || "");
-    if (method === "envio" || method === "retiro") o.shipping.method = method;
+    if (trackingNumber) o.shipping.trackingNumber = String(trackingNumber).trim();
+    if (company) o.shipping.company = String(company).trim();
+    if (method && (method === "envio" || method === "retiro")) o.shipping.method = method;
 
-    o.shippedAt = new Date();
     await o.save();
-
     broadcastOrderUpdate(o);
-    return res.json({
-      ok: true,
-      id: o._id,
-      status: o.status,
-      orderNumber: o.orderNumber,
-      shipping: o.shipping,
-      shippedAt: o.shippedAt,
-    });
+    return res.json({ ok: true, id: o._id, status: o.status, shipping: o.shipping });
   } catch (e) {
     console.error("ship order error:", e);
-    res.status(500).json({ message: "Error al despachar" });
+    res.status(500).json({ message: "Error al marcar despachado" });
   }
 });
 
 /* ===========================
- *  Marcar Entregado (ADMIN)
+ *  NUEVO: marcar ENTREGADO (ADMIN)
  * =========================== */
-router.post("/order/:id/deliver", async (req, res) => {
+router.post("/order/:id/delivered", async (req, res) => {
   try {
     if (!isAdmin(req)) return res.status(401).json({ message: "No autorizado" });
 
-    const o = await Order.findById(req.params.id);
+    const o = await Order.findByIdAndUpdate(
+      req.params.id,
+      { "shipping.deliveredAt": new Date() },
+      { new: true }
+    );
     if (!o) return res.status(404).json({ message: "No encontrado" });
 
-    o.deliveredAt = new Date();
-    await o.save();
-
     broadcastOrderUpdate(o);
-    return res.json({
-      ok: true,
-      id: o._id,
-      status: o.status,
-      orderNumber: o.orderNumber,
-      deliveredAt: o.deliveredAt,
-    });
+    return res.json({ ok: true, id: o._id, status: o.status, shipping: o.shipping });
   } catch (e) {
-    console.error("deliver order error:", e);
+    console.error("delivered order error:", e);
     res.status(500).json({ message: "Error al marcar entregado" });
   }
 });
@@ -635,8 +610,6 @@ router.get("/order/:id", async (req, res) => {
       mp: o.mp,
       shipping: o.shipping,
       transfer: o.transfer,
-      shippedAt: o.shippedAt || null,
-      deliveredAt: o.deliveredAt || null,
     });
   } catch (e) {
     console.error("GET /order/:id ERROR:", e);
@@ -646,8 +619,6 @@ router.get("/order/:id", async (req, res) => {
 
 /* =========================================================
  *  PÚBLICO: traer varias órdenes por ids / códigos guardados
- *  - ids: lista de ObjectId separados por coma
- *  - codes: lista de shippingTicket (AE-...) o #orderNumber
  * ========================================================= */
 router.get("/orders/public/by-ids", async (req, res) => {
   try {
@@ -679,8 +650,6 @@ router.get("/orders/public/by-ids", async (req, res) => {
       shippingTicket: o.shippingTicket,
       orderNumber: o.orderNumber,
       createdAt: o.createdAt,
-      shippedAt: o.shippedAt || null,
-      deliveredAt: o.deliveredAt || null,
       items: (o.items||[]).map(it => ({
         nombre: it.nombre, cantidad: it.cantidad, precio: it.precio, variant: it.variant
       }))
@@ -695,7 +664,6 @@ router.get("/orders/public/by-ids", async (req, res) => {
 
 /* =========================================================
  *  PÚBLICO: lookup por código (ticket AE-... o #número)
- *  (opcional validar por email/teléfono del comprador)
  * ========================================================= */
 router.get("/orders/public/lookup", async (req, res) => {
   try {
@@ -734,8 +702,6 @@ router.get("/orders/public/lookup", async (req, res) => {
       shippingTicket: o.shippingTicket,
       orderNumber: o.orderNumber,
       createdAt: o.createdAt,
-      shippedAt: o.shippedAt || null,
-      deliveredAt: o.deliveredAt || null,
       items: (o.items||[]).map(it => ({
         nombre: it.nombre, cantidad: it.cantidad, precio: it.precio, variant: it.variant
       }))

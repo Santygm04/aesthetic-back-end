@@ -35,6 +35,7 @@ const ShippingSchema = new mongoose.Schema(
     method: { type: String, enum: ["envio", "retiro"], default: "envio" },
     company: { type: String, default: "andreani" },
     trackingNumber: { type: String, default: null },
+    deliveredAt: { type: Date, default: null }, // 👈 NUEVO: marcar entrega final
     address: { type: AddressSchema, default: {} },
   },
   { _id: false }
@@ -61,10 +62,6 @@ const OrderSchema = new mongoose.Schema(
     paymentMethod: { type: String, enum: ["transfer", "mercadopago"], required: true },
     shippingTicket: { type: String },
     shipping: { type: ShippingSchema, default: () => ({}) },
-
-    // marcas de logística
-    shippedAt: { type: Date, default: null },     // 👈 NUEVO
-    deliveredAt: { type: Date, default: null },   // 👈 NUEVO
 
     // Mercado Pago
     mp: {

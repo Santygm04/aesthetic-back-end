@@ -78,6 +78,9 @@ const OrderSchema = new mongoose.Schema(
       alias: String,
       receiptPath: String,
     },
+
+    // 👇 NUEVO: para no descontar stock 2 veces
+    stockAdjusted: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

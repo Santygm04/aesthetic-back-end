@@ -7,6 +7,7 @@ const multer = require("multer");
 const axios = require("axios");
 const jwt = require("jsonwebtoken"); // 👈 NUEVO
 const Order = require("../models/Order");
+const Producto = require("../models/Producto"); // 👈 NUEVO: para stock
 
 /* ===========================
  *  Uploads
@@ -402,6 +403,22 @@ function isAdmin(req) {
 }
 
 /* ===========================
+ *  Helpers de stock (mínimo)
+ * =========================== */
+async function moveStock(order, mode = "deduct") {
+  const factor = mode === "deduct" ? -1 : +1;
+  const ops = (order.items || [])
+    .filter((it) => it.productId && it.cantidad)
+    .map((it) =>
+      Producto.updateOne(
+        { _id: it.productId },
+        { $inc: { stock: factor * Number(it.cantidad || 1) } }
+      ).catch(() => null)
+    );
+  await Promise.allSettled(ops);
+}
+
+/* ===========================
  *  LISTAR ÓRDENES (ADMIN)
  * =========================== */
 router.get("/orders", async (req, res) => {
@@ -431,12 +448,18 @@ router.post("/order/:id/confirm", async (req, res) => {
   try {
     if (!isAdmin(req)) return res.status(401).json({ message: "No autorizado" });
 
-    const o = await Order.findByIdAndUpdate(
-      req.params.id,
-      { status: "paid" },
-      { new: true }
-    );
+    const o = await Order.findById(req.params.id);
     if (!o) return res.status(404).json({ message: "No encontrado" });
+
+    o.status = "paid";
+
+    // 👇 Descuento de stock una sola vez
+    if (!o.stockAdjusted) {
+      await moveStock(o, "deduct");
+      o.stockAdjusted = true;
+    }
+
+    await o.save();
 
     await notifyBuyerConfirmed(o);
     await notifyAdminConfirmed(o);
@@ -464,12 +487,16 @@ async function cancelHandler(req, res) {
   try {
     if (!isAdmin(req)) return res.status(401).json({ message: "No autorizado" });
 
-    const o = await Order.findByIdAndUpdate(
-      req.params.id,
-      { status: "cancelled" },
-      { new: true }
-    );
+    const o = await Order.findById(req.params.id);
     if (!o) return res.status(404).json({ message: "No encontrado" });
+
+    // si ya habíamos descontado stock, reponer
+    if (o.stockAdjusted) {
+      await moveStock(o, "restore");
+      o.stockAdjusted = false;
+    }
+    o.status = "cancelled";
+    await o.save();
 
     broadcastOrderUpdate(o);
     return res.json({ ok: true, id: o._id, status: o.status, orderNumber: o.orderNumber });
@@ -520,6 +547,28 @@ router.post("/order/:id/delivered", async (req, res) => {
   } catch (e) {
     console.error("delivered order error:", e);
     res.status(500).json({ message: "Error al marcar entregado" });
+  }
+});
+
+/* ===========================
+ *  ELIMINAR orden (solo canceladas)
+ * =========================== */
+router.delete("/order/:id", async (req, res) => {
+  try {
+    if (!isAdmin(req)) return res.status(401).json({ message: "No autorizado" });
+
+    const o = await Order.findById(req.params.id);
+    if (!o) return res.status(404).json({ message: "No encontrado" });
+
+    if (o.status !== "cancelled") {
+      return res.status(400).json({ message: "Solo se pueden eliminar órdenes canceladas" });
+    }
+
+    await Order.deleteOne({ _id: o._id });
+    return res.json({ ok: true, id: String(o._id) });
+  } catch (e) {
+    console.error("delete order error:", e);
+    res.status(500).json({ message: "Error al eliminar" });
   }
 });
 

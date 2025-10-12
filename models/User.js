@@ -12,7 +12,7 @@ const UserSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// helper para validar contraseña
+// helper para validar 
 UserSchema.methods.checkPassword = function (plain) {
   return bcrypt.compare(plain, this.passwordHash);
 };

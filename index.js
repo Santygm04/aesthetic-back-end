@@ -34,15 +34,16 @@ const explicitlyAllowed = new Set(parseOrigins(process.env.FRONT_ORIGIN));
 const isLocalhost = (origin) =>
   /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin || "");
 
+// ✅ IMPORTANTE: CORS options
 const corsOptions = {
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true); // server-to-server/Postman
+    if (!origin) return cb(null, true); // server-to-server/Postman/curl
     console.log("[CORS] Origin recibido:", origin);
 
     if (explicitlyAllowed.size > 0) {
       if (explicitlyAllowed.has(origin)) return cb(null, true);
       if (!isProd && isLocalhost(origin)) return cb(null, true);
-      return cb(new Error("Not allowed by CORS"));
+      return cb(null, false);
     }
 
     // Sin FRONT_ORIGIN definido: permitir localhost en dev
@@ -57,9 +58,26 @@ const corsOptions = {
   allowedHeaders: ["Content-Type", "Authorization", "x-admin-secret"],
 };
 
+// ✅ 1) Aplicar CORS antes de todo
 app.use(cors(corsOptions));
+
+// ✅ 2) Responder preflight SIEMPRE (esto arregla tu error)
+app.options(/.*/, cors(corsOptions));
+
+// ✅ 3) JSON después de CORS
 app.use(express.json({ limit: "10mb" }));
+
 app.use("/uploads", express.static("uploads"));
+
+/* ✅ 4) Middleware para manejar errores de CORS y que el navegador reciba respuesta clara
+   (evita que se “corte” y termine en Failed to fetch sin info)
+*/
+app.use((err, req, res, next) => {
+  if (err && err.message && err.message.includes("CORS")) {
+    return res.status(403).json({ ok: false, message: "CORS bloqueado: " + err.message });
+  }
+  return next(err);
+});
 
 /* ============ Healthcheck simple ============ */
 app.get("/health", (req, res) => {
@@ -140,6 +158,7 @@ mongoose
     } catch (e) {
       console.warn("⚠️ No se pudieron sincronizar índices:", e?.message || e);
     }
+
     app.listen(PORT, () => console.log(`🚀 API en http://localhost:${PORT}`));
   })
   .catch((err) => console.error("❌ Error al conectar a MongoDB:", err));

@@ -340,26 +340,97 @@ router.get("/order/:id/stream", async (req, res) => {
  *  TRANSFERENCIA (crear orden)
  * =========================== */
 router.post("/transfer", upload.single("comprobante"), async (req, res) => {
-  try {
-    const total = Number(req.body.total || 0);
-    const buyer = JSON.parse(req.body.buyer || "{}");
-    const items = JSON.parse(req.body.items || "[]");
+      // ✅ Helpers locales (solo para este endpoint)
+    const toNumber = (v) => {
+      if (v === null || v === undefined) return 0;
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+
+      // soporta: "20000", "20.000", "20,000", "$20.000", " 20.000 "
+      let s = String(v).trim();
+      s = s.replace(/\$/g, "").replace(/\s/g, "");
+
+      // Si viene con miles AR "20.000" (y NO tiene coma decimal), quitamos puntos
+      // Ej: "20.000" => "20000"
+      if (/\d+\.\d{3}(\.\d{3})*(,\d+)?$/.test(s) && !s.includes(",")) {
+        s = s.replace(/\./g, "");
+      }
+
+      // Convertimos coma decimal a punto decimal: "123,45" => "123.45"
+      if (s.includes(",")) {
+        // si trae puntos de miles y coma decimal: "20.000,50" => "20000,50" => "20000.50"
+        s = s.replace(/\./g, "").replace(/,/g, ".");
+      }
+
+      const n = Number(s);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const safeJson = (raw, fallback) => {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return fallback;
+      }
+    };
+
+    // ✅ Parseo body (FormData => strings)
+    const buyer = safeJson(req.body.buyer || "{}", {});
+    const items = safeJson(req.body.items || "[]", []);
     const alias = String(req.body.alias || "").trim();
-    const shipping = JSON.parse(req.body.shipping || "{}");
+    const shipping = safeJson(req.body.shipping || "{}", {});
+    const receivedTotalRaw = req.body.total; // <- lo guardamos para debug
 
-    const normalizedItems = items.map((i) => ({
-      productId: i.productId || undefined,
-      nombre: i.nombre,
-      precio: Number(i.precio),
-      cantidad: Number(i.cantidad || 1),
-      subtotal: Number(i.precio) * Number(i.cantidad || 1),
-      variant: i.variant || undefined,
-    }));
+    // ✅ Normalizar items
+    const normalizedItems = (Array.isArray(items) ? items : []).map((i) => {
+      const precio = toNumber(i.precio);
+      const cantidad = Math.max(1, Math.floor(toNumber(i.cantidad || 1)));
+      const subtotal = Number((precio * cantidad).toFixed(2));
 
+      return {
+        productId: i.productId || undefined,
+        nombre: i.nombre,
+        precio,
+        cantidad,
+        subtotal,
+        variant: i.variant || undefined,
+      };
+    });
+
+    // ✅ Total calculado desde items (fuente de verdad)
+    const computedTotal = Number(
+      normalizedItems.reduce((acc, it) => acc + toNumber(it.subtotal), 0).toFixed(2)
+    );
+
+    // ✅ Total recibido (fallback) - parse robusto
+    const receivedTotal = toNumber(receivedTotalRaw);
+
+    // ✅ Total final
+    const finalTotal = computedTotal > 0 ? computedTotal : receivedTotal;
+
+    // ✅ Si no hay items válidos, evitamos orden basura
+    if (!normalizedItems.length) {
+      return res.status(400).json({ ok: false, message: "Items requeridos" });
+    }
+
+    // ✅ Debug (1 minuto): sacalo después
+    const DEBUG = true;
+    if (DEBUG) {
+      console.log("[/transfer] total recibido raw:", receivedTotalRaw);
+      console.log("[/transfer] total recibido parsed:", receivedTotal);
+      console.log("[/transfer] computedTotal:", computedTotal);
+      console.log("[/transfer] finalTotal:", finalTotal);
+      console.log("[/transfer] items:", normalizedItems);
+      setTimeout(() => {
+        // solo para “recordarte” sacarlo luego; no apaga logs automáticamente
+        console.log("[/transfer] ⚠️ recordatorio: apagar logs DEBUG cuando verifiques");
+      }, 60_000);
+    }
+
+    // ✅ Creamos orden usando FINAL TOTAL (no confiar en req.body.total)
     const baseDoc = {
       buyer,
       items: normalizedItems,
-      total,
+      total: finalTotal, // ✅ ACA está la corrección
       paymentMethod: "transfer",
       transfer: { alias, receiptPath: null },
       shipping: {
@@ -368,6 +439,8 @@ router.post("/transfer", upload.single("comprobante"), async (req, res) => {
         address: shipping?.address || {},
       },
       status: "pending",
+      // si tu schema lo tiene, mejor dejarlo explícito:
+      stockAdjusted: false,
     };
 
     let order;
@@ -385,6 +458,7 @@ router.post("/transfer", upload.single("comprobante"), async (req, res) => {
       }
     }
 
+    // ✅ Guardar comprobante si vino
     if (req.file) {
       const safeName = req.file.originalname.replace(/[^a-z0-9.\-_]/gi, "_");
       const finalRel = path.join("uploads", "comprobantes", `${order._id}-${safeName}`);
@@ -397,16 +471,14 @@ router.post("/transfer", upload.single("comprobante"), async (req, res) => {
     await notifyOrderByWhatsApp(order);
     broadcastOrderUpdate(order);
 
-    res.json({
+    return res.json({
       ok: true,
       orderId: order._id,
       ticket: order.shippingTicket,
       orderNumber: order.orderNumber,
+      total: order.total,           // ✅ útil para validar rápido
+      computedTotal,               // ✅ útil para validar rápido
     });
-  } catch (e) {
-    console.error("POST /transfer ERROR:", e);
-    res.status(500).json({ message: "Error al registrar transferencia" });
-  }
 });
 
 /* ===========================

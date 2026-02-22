@@ -1,44 +1,43 @@
-// models/plugins/productRealtime.js
-const { broadcast } = require("../realtime");
+// routes/products.realtime.js
+const express = require("express");
+const router = express.Router();
 
-// Campos que mandamos al front (ajustado a tu modelo real)
-function pickProduct(p) {
-  return {
-    _id: p._id,
-    nombre: p.nombre,
-    precio: p.precio,
-    categoria: p.categoria,
-    subcategoria: p.subcategoria,
-    stock: p.stock,          // stock global
-    variants: p.variants || [],
-    visible: p.visible,
-    promo: p.promo,
-    imagen: p.imagen,
-    updatedAt: p.updatedAt,
-    createdAt: p.createdAt,
-  };
+const Producto = require("../models/Producto");
+const { sseHeaders, addClient } = require("../realtime");
+
+// Helper: manda snapshot inicial (opcional pero recomendado)
+async function sendInitialProducts(res) {
+  try {
+    const list = await Producto.find({ visible: true })
+      .sort({ updatedAt: -1 })
+      .limit(300)
+      .lean();
+
+    // mandamos evento snapshot
+    res.write(`event: product:snapshot\n`);
+    res.write(`data: ${JSON.stringify(list)}\n\n`);
+  } catch (e) {
+    // no matamos el stream por esto
+    res.write(`event: product:snapshot\n`);
+    res.write(`data: ${JSON.stringify([])}\n\n`);
+  }
 }
 
-module.exports = function productRealtimePlugin(schema) {
-  // create / save / update (incluye cambios de stock)
-  schema.post("save", function (doc) {
-    broadcast("product:upsert", pickProduct(doc));
-  });
+// ✅ SSE stream (alias 1)
+router.get("/products/stream", async (req, res) => {
+  sseHeaders(res);
+  addClient(res);
 
-  schema.post("findOneAndUpdate", async function (res) {
-    if (res) {
-      const doc = await this.model.findById(res._id).lean();
-      if (doc) broadcast("product:upsert", pickProduct(doc));
-    }
-  });
+  // snapshot inicial para que el front se pinte sin esperar cambios
+  await sendInitialProducts(res);
+});
 
-  // delete (document)
-  schema.post("deleteOne", { document: true, query: false }, function (doc) {
-    broadcast("product:delete", { _id: doc._id });
-  });
+// ✅ SSE stream (alias 2)
+router.get("/productos/stream", async (req, res) => {
+  sseHeaders(res);
+  addClient(res);
 
-  // delete (query)
-  schema.post("findOneAndDelete", function (res) {
-    if (res?._id) broadcast("product:delete", { _id: res._id });
-  });
-};
+  await sendInitialProducts(res);
+});
+
+module.exports = router;

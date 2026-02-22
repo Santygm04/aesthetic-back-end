@@ -36,7 +36,7 @@ const ShippingSchema = new mongoose.Schema(
     company: { type: String, default: "andreani" },
     trackingNumber: { type: String, default: null },
     address: { type: AddressSchema, default: {} },
-    // 👇 NUEVO: timestamps simples de logística
+    // timestamps simples de logística
     shippedAt: { type: Date, default: null },
     deliveredAt: { type: Date, default: null },
   },
@@ -56,12 +56,20 @@ const OrderSchema = new mongoose.Schema(
     },
     items: { type: [ItemSchema], default: [] },
     total: { type: Number, required: true },
+
+    // ✅ agregamos rejected (tu UI lo usa y MP puede rechazar)
     status: {
       type: String,
-      enum: ["pending", "paid", "cancelled"],
+      enum: ["pending", "paid", "rejected", "cancelled"],
       default: "pending",
     },
-    paymentMethod: { type: String, enum: ["transfer", "mercadopago"], required: true },
+
+    paymentMethod: {
+      type: String,
+      enum: ["transfer", "mercadopago"],
+      required: true,
+    },
+
     shippingTicket: { type: String },
     shipping: { type: ShippingSchema, default: () => ({}) },
 
@@ -79,7 +87,7 @@ const OrderSchema = new mongoose.Schema(
       receiptPath: String,
     },
 
-    // 👇 NUEVO: para no descontar stock 2 veces
+    // para no descontar stock 2 veces
     stockAdjusted: { type: Boolean, default: false },
   },
   { timestamps: true }
@@ -109,7 +117,7 @@ OrderSchema.pre("save", async function (next) {
         { returnDocument: "after" }
       );
 
-      // Fallback defensivo si por algún motivo no hay valor
+      // Fallback defensivo
       let nextSeq = ret?.value?.seq;
       if (typeof nextSeq !== "number") {
         const doc = await coll.findOne({ _id: "orders" });

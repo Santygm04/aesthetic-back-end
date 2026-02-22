@@ -6,9 +6,26 @@ const path = require("path");
 const multer = require("multer");
 const axios = require("axios");
 const jwt = require("jsonwebtoken"); // 👈 NUEVO
+const { MercadoPagoConfig, Preference, Payment } = require("mercadopago");// ✅ MERCADO PAGO
 const Order = require("../models/Order");
 const Producto = require("../models/Producto"); // 👈 NUEVO: para stock
 
+/* ===========================
+ *  Mercado Pago config (SDK v2)
+ * =========================== */
+const mpAccessToken = (process.env.MP_ACCESS_TOKEN || "").trim();
+let mpClient = null;
+let mpPreference = null;
+let mpPayment = null;
+
+if (mpAccessToken) {
+  mpClient = new MercadoPagoConfig({ accessToken: mpAccessToken });
+  mpPreference = new Preference(mpClient);
+  mpPayment = new Payment(mpClient);
+  console.log("[MP] SDK listo. Token seteado:", true);
+} else {
+  console.warn("[MP] MP_ACCESS_TOKEN no está seteado (Mercado Pago deshabilitado)");
+}
 /* ===========================
  *  Uploads
  * =========================== */
@@ -245,6 +262,14 @@ function resolveFrontBase(req) {
   }
 }
 
+/* ===== base BACK (para webhook) ===== */
+function resolveBackBase(req) {
+  const envBack = (process.env.PUBLIC_URL || process.env.BACK_URL || "").trim();
+  if (envBack) return envBack.replace(/\/$/, "");
+  // fallback por si estás local
+  return `${req.protocol}://${req.get("host")}`;
+}
+
 /* ===========================
  *  DEBUG
  * =========================== */
@@ -252,6 +277,10 @@ router.get("/debug", (req, res) => {
   return res.json({
     ok: true,
     resolvedFrontBase: resolveFrontBase(req),
+    resolvedBackBase: resolveBackBase(req),
+    mp: {
+      hasAccessToken: !!process.env.MP_ACCESS_TOKEN,
+    },
     whatsapp: {
       hasToken: !!WSP_TOKEN,
       hasPhoneId: !!WSP_PHONE_ID,
@@ -266,7 +295,6 @@ router.get("/debug", (req, res) => {
  * ========================================================= */
 const streamsByOrder = new Map(); // orderId -> [res, res, ...]
 
-// helper SSE
 function sseWrite(res, event, payload) {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
@@ -342,7 +370,6 @@ router.post("/transfer", upload.single("comprobante"), async (req, res) => {
       status: "pending",
     };
 
-    // 👉 create con retry SOLO si choca orderNumber (E11000)
     let order;
     try {
       order = await Order.create(baseDoc);
@@ -352,7 +379,7 @@ router.post("/transfer", upload.single("comprobante"), async (req, res) => {
         (err?.keyPattern?.orderNumber || err?.errorResponse?.keyPattern?.orderNumber);
       if (dupOrderNumber) {
         console.warn("[/transfer] duplicate orderNumber, retrying once…");
-        order = await Order.create(baseDoc); // el pre-save vuelve a pedir el siguiente número
+        order = await Order.create(baseDoc);
       } else {
         throw err;
       }
@@ -374,11 +401,192 @@ router.post("/transfer", upload.single("comprobante"), async (req, res) => {
       ok: true,
       orderId: order._id,
       ticket: order.shippingTicket,
-      orderNumber: order.orderNumber, // 👈 devolvemos nro simple
+      orderNumber: order.orderNumber,
     });
   } catch (e) {
     console.error("POST /transfer ERROR:", e);
     res.status(500).json({ message: "Error al registrar transferencia" });
+  }
+});
+
+/* ===========================
+ *  MERCADO PAGO (Checkout Pro)
+ * =========================== */
+router.post("/mp/create-preference", async (req, res) => {
+  try {
+    // ✅ chequear el objeto real, no solo env var
+    if (!mpPreference) {
+      return res.status(400).json({ ok: false, message: "Mercado Pago no configurado (faltan credenciales)" });
+    }
+
+    const total = Number(req.body.total || 0);
+    const buyer = req.body.buyer || {};
+    const items = Array.isArray(req.body.items) ? req.body.items : [];
+    const shipping = req.body.shipping || {};
+
+    if (!items.length) {
+      return res.status(400).json({ ok: false, message: "Items requeridos" });
+    }
+
+    const normalizedItems = items.map((i) => ({
+      productId: i.productId || undefined,
+      nombre: i.nombre,
+      precio: Number(i.precio),
+      cantidad: Number(i.cantidad || 1),
+      subtotal: Number(i.precio) * Number(i.cantidad || 1),
+      variant: i.variant || undefined,
+    }));
+
+    // ✅ logs útiles (SIN TOKEN)
+    const frontBase = resolveFrontBase(req);
+    const backBase = resolveBackBase(req);
+    console.log("[MP] create-preference payload:", {
+      total,
+      itemsCount: normalizedItems.length,
+      frontBase,
+      backBase,
+      hasToken: !!mpAccessToken,
+    });
+
+    const baseDoc = {
+      buyer,
+      items: normalizedItems,
+      total,
+      paymentMethod: "mercadopago",
+      mp: { preferenceId: null, paymentId: null, status: "pending" },
+      shipping: {
+        method: shipping?.method || "envio",
+        company: "andreani",
+        address: shipping?.address || {},
+      },
+      status: "pending",
+    };
+
+    let order;
+    try {
+      order = await Order.create(baseDoc);
+    } catch (err) {
+      const dupOrderNumber =
+        err?.code === 11000 &&
+        (err?.keyPattern?.orderNumber || err?.errorResponse?.keyPattern?.orderNumber);
+      if (dupOrderNumber) {
+        console.warn("[/mp/create-preference] duplicate orderNumber, retrying once…");
+        order = await Order.create(baseDoc);
+      } else {
+        throw err;
+      }
+    }
+
+    const preference = {
+      items: normalizedItems.map((it) => ({
+        title: it.nombre || "Producto",
+        quantity: Number(it.cantidad || 1),
+        unit_price: Number(it.precio), // MP requiere number
+        currency_id: "ARS",
+      })),
+
+      back_urls: {
+        success: `${frontBase}/pago/exito?o=${order._id}&fresh=1`,
+        failure: `${frontBase}/pago/error?o=${order._id}&fresh=1`,
+        pending: `${frontBase}/pago/pending?o=${order._id}&fresh=1`,
+      },
+      auto_return: "approved",
+
+      notification_url: `${backBase}/api/payments/mp/webhook`,
+      external_reference: String(order._id),
+      metadata: { orderId: String(order._id) },
+    };
+
+    const mpRes = await mpPreference.create({ body: preference });
+    const prefId = mpRes?.id;
+    const initPoint = mpRes?.init_point;
+
+    if (!prefId || !initPoint) {
+      console.error("[MP] Respuesta inesperada al crear preferencia:", mpRes);
+      return res.status(500).json({ ok: false, message: "Mercado Pago no devolvió init_point" });
+    }
+
+    await Order.findByIdAndUpdate(order._id, {
+      "mp.preferenceId": prefId,
+      "mp.status": "pending",
+    });
+
+    return res.json({
+      ok: true,
+      orderId: order._id,
+      preferenceId: prefId,
+      init_point: initPoint,
+      ticket: order.shippingTicket,
+      orderNumber: order.orderNumber,
+    });
+  } catch (e) {
+    // ✅ ESTE LOG te va a decir el motivo real del 500
+    console.error("POST /mp/create-preference ERROR message:", e?.message);
+    console.error("POST /mp/create-preference ERROR cause:", e?.cause || null);
+    console.error("POST /mp/create-preference ERROR response:", e?.response?.data || null);
+    console.error("POST /mp/create-preference FULL:", e);
+
+    return res.status(500).json({ ok: false, message: "Error creando preferencia MP" });
+  }
+});
+router.post("/mp/webhook", async (req, res) => {
+  try {
+    // MP manda: ?type=payment&data.id=...
+    const type = req.query.type || req.query.topic;
+    const paymentId = req.query["data.id"] || req.query.id;
+
+    if (type !== "payment" || !paymentId) {
+      return res.status(200).send("ok");
+    }
+
+    if (!mpPayment) {
+  // webhook: siempre responder ok para que MP no reintente infinito
+  return res.status(200).send("ok");
+}
+
+const payment = await mpPayment.get({ id: String(paymentId) });
+const p = payment; // SDK nuevo devuelve el objeto directo
+
+    const orderId = p?.metadata?.orderId || p?.external_reference || null;
+    if (!orderId) return res.status(200).send("ok");
+
+    const status = p.status; // approved | rejected | pending | in_process
+    const detail = p.status_detail;
+
+    const newOrderStatus =
+      status === "approved" ? "paid" :
+      status === "rejected" ? "rejected" :
+      "pending";
+
+    const o = await Order.findById(orderId);
+    if (!o) return res.status(200).send("ok");
+
+    o.status = newOrderStatus;
+    o.paymentMethod = "mercadopago";
+    o.mp = {
+      ...(o.mp || {}),
+      paymentId: String(paymentId),
+      status,
+      status_detail: detail,
+    };
+
+    // ✅ si se aprobó, descontar stock una sola vez (igual que admin confirm)
+    if (newOrderStatus === "paid" && !o.stockAdjusted) {
+      await moveStock(o, "deduct");
+      o.stockAdjusted = true;
+
+      await notifyBuyerConfirmed(o);
+      await notifyAdminConfirmed(o);
+    }
+
+    await o.save();
+    broadcastOrderUpdate(o);
+
+    return res.status(200).send("ok");
+  } catch (e) {
+    console.error("POST /mp/webhook ERROR:", e);
+    // MP reintenta si devolvés 500, por eso respondemos ok
+    return res.status(200).send("ok");
   }
 });
 
@@ -453,7 +661,6 @@ router.post("/order/:id/confirm", async (req, res) => {
 
     o.status = "paid";
 
-    // 👇 Descuento de stock una sola vez
     if (!o.stockAdjusted) {
       await moveStock(o, "deduct");
       o.stockAdjusted = true;
@@ -490,7 +697,6 @@ async function cancelHandler(req, res) {
     const o = await Order.findById(req.params.id);
     if (!o) return res.status(404).json({ message: "No encontrado" });
 
-    // si ya habíamos descontado stock, reponer
     if (o.stockAdjusted) {
       await moveStock(o, "restore");
       o.stockAdjusted = false;
@@ -511,7 +717,6 @@ router.post("/order/:id/reject", cancelHandler);
 /* =========================================================
  *  NUEVO: Logística simple (despacho/entrega)
  * ========================================================= */
-// Despachar (tracking/empresa opcionales)
 router.post("/order/:id/ship", async (req, res) => {
   try {
     if (!isAdmin(req)) return res.status(401).json({ message: "No autorizado" });
@@ -533,7 +738,6 @@ router.post("/order/:id/ship", async (req, res) => {
   }
 });
 
-// Entregado
 router.post("/order/:id/delivered", async (req, res) => {
   try {
     if (!isAdmin(req)) return res.status(401).json({ message: "No autorizado" });

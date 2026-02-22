@@ -1,3 +1,4 @@
+// models/Producto.js
 const mongoose = require("mongoose");
 
 const PromoSchema = new mongoose.Schema(
@@ -19,9 +20,9 @@ const PromoSchema = new mongoose.Schema(
  */
 const VariantSchema = new mongoose.Schema(
   {
-    vid: { type: String, required: true },       // ej: "m-negro-8fj2"
-    size: { type: String, trim: true },          // talle
-    color: { type: String, trim: true },         // nombre de color o código
+    vid: { type: String, required: true }, // ej: "m-negro-8fj2"
+    size: { type: String, trim: true }, // talle
+    color: { type: String, trim: true }, // nombre de color o código
     stock: { type: Number, default: 0, min: 0 },
     price: { type: Number, min: 0, default: null },
     sku: { type: String, default: undefined },
@@ -32,7 +33,7 @@ const VariantSchema = new mongoose.Schema(
 const ProductoSchema = new mongoose.Schema(
   {
     nombre: { type: String, required: true, trim: true },
-    precio: { type: Number, required: true, min: 0 },             // precio base
+    precio: { type: Number, required: true, min: 0 }, // precio base
     precioOriginal: { type: Number, min: 0, default: undefined },
     imagen: { type: String, default: "" },
     descripcion: { type: String, default: "" },
@@ -54,6 +55,11 @@ const ProductoSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+/**
+ * ✅ Plugin realtime (Mongoose plugin, acá está perfecto)
+ * OJO: este require es correcto porque Producto.js está en /models
+ * y el plugin está en /models/plugins
+ */
 const productRealtimePlugin = require("./plugins/productRealtime");
 ProductoSchema.plugin(productRealtimePlugin);
 

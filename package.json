@@ -20,7 +20,7 @@
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
-    "mercadopago": "^2.8.0",
+    "mercadopago": "^2.12.0",
     "mongoose": "^8.17.0",
     "multer": "^2.0.2",
     "node-cron": "^4.2.1"

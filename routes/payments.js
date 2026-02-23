@@ -486,12 +486,35 @@ router.post("/transfer", upload.single("comprobante"), async (req, res) => {
  * =========================== */
 router.post("/mp/create-preference", async (req, res) => {
   try {
-    // ✅ chequear el objeto real, no solo env var
     if (!mpPreference) {
-      return res.status(400).json({ ok: false, message: "Mercado Pago no configurado (faltan credenciales)" });
+      return res.status(400).json({
+        ok: false,
+        message: "Mercado Pago no configurado (faltan credenciales)",
+      });
     }
 
-    const total = Number(req.body.total || 0);
+    // ✅ helper robusto AR (igual idea que en /transfer)
+    const toNumber = (v) => {
+      if (v === null || v === undefined) return 0;
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+
+      let s = String(v).trim();
+      s = s.replace(/\$/g, "").replace(/\s/g, "");
+
+      // "20.000" => "20000" (si no hay coma decimal)
+      if (/\d+\.\d{3}(\.\d{3})*(,\d+)?$/.test(s) && !s.includes(",")) {
+        s = s.replace(/\./g, "");
+      }
+
+      // "20.000,50" => "20000.50"
+      if (s.includes(",")) {
+        s = s.replace(/\./g, "").replace(/,/g, ".");
+      }
+
+      const n = Number(s);
+      return Number.isFinite(n) ? n : 0;
+    };
+
     const buyer = req.body.buyer || {};
     const items = Array.isArray(req.body.items) ? req.body.items : [];
     const shipping = req.body.shipping || {};
@@ -500,30 +523,58 @@ router.post("/mp/create-preference", async (req, res) => {
       return res.status(400).json({ ok: false, message: "Items requeridos" });
     }
 
-    const normalizedItems = items.map((i) => ({
-      productId: i.productId || undefined,
-      nombre: i.nombre,
-      precio: Number(i.precio),
-      cantidad: Number(i.cantidad || 1),
-      subtotal: Number(i.precio) * Number(i.cantidad || 1),
-      variant: i.variant || undefined,
-    }));
+    // ✅ normalizar items
+    const normalizedItems = items.map((i) => {
+      const precio = toNumber(i.precio);
+      const cantidad = Math.max(1, Math.floor(toNumber(i.cantidad || 1)));
+      const subtotal = Number((precio * cantidad).toFixed(2));
 
-    // ✅ logs útiles (SIN TOKEN)
-    const frontBase = resolveFrontBase(req);
-    const backBase = resolveBackBase(req);
-    console.log("[MP] create-preference payload:", {
-      total,
-      itemsCount: normalizedItems.length,
-      frontBase,
-      backBase,
-      hasToken: !!mpAccessToken,
+      return {
+        productId: i.productId || undefined,
+        nombre: i.nombre,
+        precio,
+        cantidad,
+        subtotal,
+        variant: i.variant || undefined,
+      };
     });
 
+    // ✅ total REAL desde items
+    const computedTotal = Number(
+      normalizedItems.reduce((acc, it) => acc + toNumber(it.subtotal), 0).toFixed(2)
+    );
+
+    // fallback por si te mandan total válido
+    const receivedTotal = toNumber(req.body.total);
+
+    const finalTotal = computedTotal > 0 ? computedTotal : receivedTotal;
+
+    if (!finalTotal || finalTotal <= 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "Total inválido (revisar precios/cantidades enviadas)",
+        computedTotal,
+        receivedTotal,
+      });
+    }
+
+    const frontBase = resolveFrontBase(req);
+    const backBase = resolveBackBase(req);
+
+    console.log("[MP] create-preference:", {
+      itemsCount: normalizedItems.length,
+      computedTotal,
+      receivedTotal,
+      finalTotal,
+      frontBase,
+      backBase,
+    });
+
+    // ✅ creás la orden con total correcto
     const baseDoc = {
       buyer,
       items: normalizedItems,
-      total,
+      total: finalTotal, // ✅ FIX
       paymentMethod: "mercadopago",
       mp: { preferenceId: null, paymentId: null, status: "pending" },
       shipping: {
@@ -532,6 +583,7 @@ router.post("/mp/create-preference", async (req, res) => {
         address: shipping?.address || {},
       },
       status: "pending",
+      stockAdjusted: false,
     };
 
     let order;
@@ -549,11 +601,12 @@ router.post("/mp/create-preference", async (req, res) => {
       }
     }
 
+    // ✅ preferencia MP con unit_price numérico limpio
     const preference = {
       items: normalizedItems.map((it) => ({
         title: it.nombre || "Producto",
         quantity: Number(it.cantidad || 1),
-        unit_price: Number(it.precio), // MP requiere number
+        unit_price: Number(toNumber(it.precio)), // ✅ FIX
         currency_id: "ARS",
       })),
 
@@ -574,7 +627,7 @@ router.post("/mp/create-preference", async (req, res) => {
     const initPoint = mpRes?.init_point;
 
     if (!prefId || !initPoint) {
-      console.error("[MP] Respuesta inesperada al crear preferencia:", mpRes);
+      console.error("[MP] Respuesta inesperada:", mpRes);
       return res.status(500).json({ ok: false, message: "Mercado Pago no devolvió init_point" });
     }
 
@@ -590,14 +643,11 @@ router.post("/mp/create-preference", async (req, res) => {
       init_point: initPoint,
       ticket: order.shippingTicket,
       orderNumber: order.orderNumber,
+      total: order.total,        // ✅ para validar rápido
+      computedTotal,             // ✅ debug
     });
   } catch (e) {
-    // ✅ ESTE LOG te va a decir el motivo real del 500
-    console.error("POST /mp/create-preference ERROR message:", e?.message);
-    console.error("POST /mp/create-preference ERROR cause:", e?.cause || null);
-    console.error("POST /mp/create-preference ERROR response:", e?.response?.data || null);
-    console.error("POST /mp/create-preference FULL:", e);
-
+    console.error("POST /mp/create-preference ERROR:", e?.response?.data || e);
     return res.status(500).json({ ok: false, message: "Error creando preferencia MP" });
   }
 });

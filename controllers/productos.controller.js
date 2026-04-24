@@ -19,11 +19,20 @@ const getProductos = async (req, res) => {
     if (subcategoria) filtro.subcategoria = String(subcategoria).toLowerCase();
     if (marca) filtro.marca = marca;
     if (q) {
-      // búsqueda simple por nombre (y texto si tenés el índice)
-      filtro.$or = [
-        { nombre: { $regex: q, $options: "i" } },
-        { descripcion: { $regex: q, $options: "i" } },
-      ];
+  filtro.$or = [
+    { nombre: { $regex: q, $options: "i" } },
+    { descripcion: { $regex: q, $options: "i" } },
+  ];
+  }
+
+    // Nuevos ingresos: productos con tag "nuevos-ingresos"
+    if (req.query.tag === "nuevos-ingresos") {
+      filtro.tags = "nuevos-ingresos";
+    }
+
+    // Más vendidos: productos destacados, ordenados por ventas
+    if (req.query.tag === "mas-vendidos") {
+      filtro.destacado = true;
     }
 
     const perPage = Math.min(Number(limit) || 100, 200);

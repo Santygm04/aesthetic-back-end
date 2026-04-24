@@ -8,7 +8,6 @@ const toInt = (v, def) => {
   return Number.isNaN(n) ? def : n;
 };
 
-// normalizar precio "3.333", "3,333", "3333"
 const parsePrecio = (val) => {
   if (val === null || val === undefined || val === "") return null;
   const s = String(val).trim().replace(/\./g, "").replace(",", ".");
@@ -16,7 +15,6 @@ const parsePrecio = (val) => {
   return Number.isFinite(n) ? n : null;
 };
 
-// porcentajes "25" o "25%" o "25,5"
 const parsePct = (val) => {
   if (val === null || val === undefined || val === "") return null;
   const s = String(val).replace("%", "").replace(",", ".").trim();
@@ -25,30 +23,22 @@ const parsePct = (val) => {
   return Math.max(0, Math.min(100, n));
 };
 
-// ---------- helpers de visibilidad ----------
 const isAdminReq = (req) => String(req.query.admin) === "true";
 
-/**
- * Regla pública:
- * - Mostrar todo salvo visible === false (no depende del stock)
- */
 const baseVis = (req) =>
   isAdminReq(req)
     ? []
     : [{ $or: [{ visible: { $exists: false } }, { visible: true }] }];
 
-// compone el filtro final agregando visibilidad
 const withVis = (req, extra = {}) => {
   const vis = baseVis(req);
-  if (!vis.length) return extra; // admin = sin filtro
+  if (!vis.length) return extra;
   if (!extra || Object.keys(extra).length === 0) return { $and: vis };
   return { $and: [...vis, extra] };
 };
 
-// parsea "true"/"false" o booleanos reales
 const parseBool = (v) => (typeof v === "string" ? v === "true" : !!v);
 
-// ---------- helpers variantes ----------
 const toSlug = (str) =>
   String(str || "")
     .toLowerCase()
@@ -76,16 +66,8 @@ const normalizeVariants = (arr) => {
       const size = v?.size ? String(v.size).trim() : "";
       const color = v?.color ? String(v.color).trim() : "";
       const vid = v?.vid ? String(v.vid) : makeVid(size, color);
-      return {
-        vid,
-        size,
-        color,
-        stock,
-        price,
-        sku: v?.sku || undefined,
-      };
+      return { vid, size, color, stock, price, sku: v?.sku || undefined };
     })
-    // evitar duplicados exactos size+color (nos quedamos con el último)
     .reduce((acc, cur) => {
       const key = `${cur.size}::${cur.color}`;
       const i = acc.findIndex((x) => `${x.size}::${x.color}` === key);
@@ -97,6 +79,15 @@ const normalizeVariants = (arr) => {
 
 const sumVariantStock = (variants) =>
   Array.isArray(variants) ? variants.reduce((a, b) => a + (Number(b.stock) || 0), 0) : 0;
+
+// ─── Helper para parsear campos numéricos opcionales del body ───────────────
+// Devuelve el número si viene, null si viene vacío, undefined si no viene
+const parseOptionalNum = (val) => {
+  if (val === undefined) return undefined;        // no vino en el body → no tocar
+  if (val === null || val === "") return null;     // vino vacío → guardar null
+  const n = Number(val);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+};
 
 // -------------------------
 // CREAR PRODUCTO
@@ -115,31 +106,24 @@ router.post("/", async (req, res) => {
         : parsePrecio(b.precioOriginal);
 
     const categoria = b.categoria ? String(b.categoria).toLowerCase() : "";
-    const subcategoria = b.subcategoria
-      ? String(b.subcategoria).toLowerCase()
-      : "";
+    const subcategoria = b.subcategoria ? String(b.subcategoria).toLowerCase() : "";
 
-    // Variantes (opcional) — acepto b.variants o b.variantes
     const vReq = b.variants ?? b.variantes;
     const variants = normalizeVariants(vReq);
 
-    // ✅ Stock SIEMPRE desde el campo global (no se suma por variantes)
     const stock = Math.max(
       0,
       typeof b.stock === "number" ? b.stock : toInt(b.stock, 0)
     );
 
-    // por defecto visible
     const visible = b.visible !== undefined ? parseBool(b.visible) : true;
-
     const tags = Array.isArray(b.tags) ? b.tags : [];
 
-    // ---------------- promo (precio o porcentaje) ----------------
     let promo = undefined;
-
-    // preferimos porcentaje si viene
-    const pct =
-      parsePct(b.promoPct ?? b.promoPorcentaje ?? b.pctPromo ?? b?.promo?.pct ?? b?.promo?.percent ?? b?.promo?.porcentaje);
+    const pct = parsePct(
+      b.promoPct ?? b.promoPorcentaje ?? b.pctPromo ??
+      b?.promo?.pct ?? b?.promo?.percent ?? b?.promo?.porcentaje
+    );
 
     if (pct !== null) {
       const active = b.promoActivo !== undefined ? !!b.promoActivo : (b?.promo?.active ?? true);
@@ -162,11 +146,8 @@ router.post("/", async (req, res) => {
       if (promo.active) {
         if (!(promo.precio >= 0))
           return res.status(400).json({ message: "Precio promo inválido" });
-        if (promo.precio >= precio) {
-          return res
-            .status(400)
-            .json({ message: "El precio promo debe ser menor al precio base" });
-        }
+        if (promo.precio >= precio)
+          return res.status(400).json({ message: "El precio promo debe ser menor al precio base" });
       }
     } else if (b.promo) {
       promo = { ...b.promo };
@@ -174,16 +155,25 @@ router.post("/", async (req, res) => {
     }
 
     const doc = new Producto({
-      nombre: String(b.nombre || "").trim(),
+      nombre:      String(b.nombre || "").trim(),
       precio,
+      // ── 3 PRECIOS ──────────────────────────────────────────────
+      precioEspecial:  parseOptionalNum(b.precioEspecial)  ?? null,
+      precioMayorista: parseOptionalNum(b.precioMayorista) ?? null,
+      // ── #8 CAJAS + TONOS ───────────────────────────────────────
+      unidadesPorCaja:  parseOptionalNum(b.unidadesPorCaja)  ?? null,
+      cantidadTonos:    parseOptionalNum(b.cantidadTonos)    ?? null,
+      modoTonos:        b.modoTonos || "automatico",
+      tonosDisponibles: Array.isArray(b.tonosDisponibles) ? b.tonosDisponibles : [],
+      // ──────────────────────────────────────────────────────────
       precioOriginal,
-      imagen: b.imagen || "",
+      imagen:      b.imagen || "",
       descripcion: String(b.descripcion || "").trim(),
       categoria,
       subcategoria,
-      stock,          // 👈 usa el global
-      variants,       // 👈 se guardan, pero no afectan stock global
-      sku: b.sku || undefined,
+      stock,
+      variants,
+      sku:       b.sku || undefined,
       destacado: !!b.destacado,
       tags,
       promo,
@@ -198,22 +188,15 @@ router.post("/", async (req, res) => {
   }
 });
 
-/* ==========================
-   STATS / BADGES (robusta)
-   ========================== */
+/* ========================== STATS ========================== */
 router.get("/stats", async (req, res) => {
   try {
     const now = new Date();
-
-    // visibilidad (público/admin)
     const visMatch = withVis(req, {});
-
-    // Normalizador seguro: evita errores cuando categoria es null/no-string
     const categoriaNormExpr = {
       $toLower: { $ifNull: [{ $toString: "$categoria" }, ""] },
     };
 
-    // Por categoría: totales y últimas fechas
     const byCat = await Producto.aggregate([
       { $match: visMatch },
       { $addFields: { categoriaNorm: categoriaNormExpr } },
@@ -227,24 +210,11 @@ router.get("/stats", async (req, res) => {
       },
     ]);
 
-    // Promos activas por categoría
     const promoBaseMatch = {
       "promo.active": true,
       $and: [
-        {
-          $or: [
-            { "promo.desde": { $lte: now } },
-            { "promo.desde": null },
-            { "promo.desde": { $exists: false } },
-          ],
-        },
-        {
-          $or: [
-            { "promo.hasta": { $gte: now } },
-            { "promo.hasta": null },
-            { "promo.hasta": { $exists: false } },
-          ],
-        },
+        { $or: [{ "promo.desde": { $lte: now } }, { "promo.desde": null }, { "promo.desde": { $exists: false } }] },
+        { $or: [{ "promo.hasta": { $gte: now } }, { "promo.hasta": null }, { "promo.hasta": { $exists: false } }] },
       ],
     };
     const promoMatch = withVis(req, promoBaseMatch);
@@ -252,23 +222,12 @@ router.get("/stats", async (req, res) => {
     const promosByCatAgg = await Producto.aggregate([
       { $match: promoMatch },
       { $addFields: { categoriaNorm: categoriaNormExpr } },
-      {
-        $group: {
-          _id: "$categoriaNorm",
-          count: { $sum: 1 },
-          latest: { $max: "$updatedAt" },
-        },
-      },
+      { $group: { _id: "$categoriaNorm", count: { $sum: 1 }, latest: { $max: "$updatedAt" } } },
     ]);
 
-    // Nuevos ingresos
     const nuevosBase = {
       $or: [
-        {
-          $expr: {
-            $eq: [categoriaNormExpr, "nuevos-ingresos"],
-          },
-        },
+        { $expr: { $eq: [categoriaNormExpr, "nuevos-ingresos"] } },
         { tags: "nuevos-ingresos" },
         { tags: { $regex: "nuev", $options: "i" } },
       ],
@@ -277,10 +236,7 @@ router.get("/stats", async (req, res) => {
 
     const [nuevosCount, ultimoNuevo] = await Promise.all([
       Producto.countDocuments(nuevosMatch),
-      Producto.findOne(nuevosMatch)
-        .sort({ createdAt: -1 })
-        .select({ _id: 1, createdAt: 1 })
-        .lean(),
+      Producto.findOne(nuevosMatch).sort({ createdAt: -1 }).select({ _id: 1, createdAt: 1 }).lean(),
     ]);
 
     const mapByCat = (arr, pick) =>
@@ -294,10 +250,7 @@ router.get("/stats", async (req, res) => {
         latestCreated: r.latestCreated,
         latestUpdated: r.latestUpdated,
       })),
-      promosByCat: mapByCat(promosByCatAgg, (r) => ({
-        count: r.count,
-        latest: r.latest,
-      })),
+      promosByCat: mapByCat(promosByCatAgg, (r) => ({ count: r.count, latest: r.latest })),
     });
   } catch (e) {
     console.error("GET /stats ERROR:", e);
@@ -305,45 +258,21 @@ router.get("/stats", async (req, res) => {
   }
 });
 
-// -------------------------
-// NUEVO: LISTADO DE PROMOS
-// -------------------------
+/* ========================== PROMOS ========================== */
 router.get("/promos", async (req, res) => {
   try {
     const now = new Date();
     const limitNum = Math.max(1, Math.min(200, toInt(req.query.limit, 60)));
-
-    // Promos activas por bandera promo.active y ventana de fechas
     const promoActiveWindow = {
       "promo.active": true,
       $and: [
-        {
-          $or: [
-            { "promo.desde": { $lte: now } },
-            { "promo.desde": null },
-            { "promo.desde": { $exists: false } },
-          ],
-        },
-        {
-          $or: [
-            { "promo.hasta": { $gte: now } },
-            { "promo.hasta": null },
-            { "promo.hasta": { $exists: false } },
-          ],
-        },
+        { $or: [{ "promo.desde": { $lte: now } }, { "promo.desde": null }, { "promo.desde": { $exists: false } }] },
+        { $or: [{ "promo.hasta": { $gte: now } }, { "promo.hasta": null }, { "promo.hasta": { $exists: false } }] },
       ],
     };
-
-    // También incluir productos con precioOriginal > precio (aunque no tengan promo.active)
     const priceDrop = { $expr: { $gt: ["$precioOriginal", "$precio"] } };
-
     const query = withVis(req, { $or: [promoActiveWindow, priceDrop] });
-
-    const items = await Producto.find(query)
-      .sort({ updatedAt: -1, createdAt: -1 })
-      .limit(limitNum)
-      .lean();
-
+    const items = await Producto.find(query).sort({ updatedAt: -1, createdAt: -1 }).limit(limitNum).lean();
     res.json(items);
   } catch (e) {
     console.error("GET /promos ERROR:", e);
@@ -351,16 +280,12 @@ router.get("/promos", async (req, res) => {
   }
 });
 
-// -------------------------
-// BÚSQUEDA
-// -------------------------
+/* ========================== BÚSQUEDA ========================== */
 router.get("/search", async (req, res) => {
   try {
     const { q = "", page = "1", limit = "24" } = req.query;
     const queryString = String(q || "").trim();
-    if (!queryString) {
-      return res.json({ items: [], page: 1, pages: 1, total: 0 });
-    }
+    if (!queryString) return res.json({ items: [], page: 1, pages: 1, total: 0 });
 
     const pageNum = Math.max(1, toInt(page, 1));
     const limitNum = Math.max(1, Math.min(200, toInt(limit, 24)));
@@ -370,81 +295,45 @@ router.get("/search", async (req, res) => {
     const projection = { score: { $meta: "textScore" } };
 
     const [items, total] = await Promise.all([
-      Producto.find(filter, projection)
-        .sort({ score: { $meta: "textScore" } })
-        .skip(skip)
-        .limit(limitNum),
+      Producto.find(filter, projection).sort({ score: { $meta: "textScore" } }).skip(skip).limit(limitNum),
       Producto.countDocuments(filter),
     ]);
 
-    res.json({
-      items,
-      page: pageNum,
-      pages: Math.max(1, Math.ceil(total / limitNum)),
-      total,
-      q: queryString,
-    });
+    res.json({ items, page: pageNum, pages: Math.max(1, Math.ceil(total / limitNum)), total, q: queryString });
   } catch (e) {
     console.error("GET /search ERROR:", e);
     res.status(500).json({ message: "Error en búsqueda" });
   }
 });
 
-// -------------------------
-// SUGERENCIAS (para autocomplete)
-// -------------------------
+/* ========================== SUGGEST ========================== */
 router.get("/suggest", async (req, res) => {
   try {
     const q = String(req.query.q || "").trim();
     const limit = Math.max(1, Math.min(50, toInt(req.query.limit, 8)));
     if (!q) return res.json([]);
 
-    // 1) Intento con índice de texto si existe
     let out = [];
     const set = new Set();
     try {
       const textFilter = withVis(req, { $text: { $search: q } });
-      const docs = await Producto.find(
-        textFilter,
-        { score: { $meta: "textScore" }, nombre: 1 }
-      )
-        .sort({ score: { $meta: "textScore" } })
-        .limit(limit * 3)
-        .lean();
-
+      const docs = await Producto.find(textFilter, { score: { $meta: "textScore" }, nombre: 1 })
+        .sort({ score: { $meta: "textScore" } }).limit(limit * 3).lean();
       for (const d of docs) {
         const s = d?.nombre?.trim();
-        if (s && !set.has(s.toLowerCase())) {
-          set.add(s.toLowerCase());
-          out.push(s);
-          if (out.length >= limit) break;
-        }
+        if (s && !set.has(s.toLowerCase())) { set.add(s.toLowerCase()); out.push(s); if (out.length >= limit) break; }
       }
-    } catch (_) {
-      // sin índice de texto o error -> uso regex
-    }
+    } catch (_) {}
 
-    // 2) Fallback regex si faltan resultados
     if (out.length < limit) {
       const esc = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const re = new RegExp(esc(q), "i");
-      const docs2 = await Producto.find(
-        withVis(req, { nombre: re }),
-        { nombre: 1 }
-      )
-        .limit(limit * 3)
-        .lean();
-
+      const docs2 = await Producto.find(withVis(req, { nombre: re }), { nombre: 1 }).limit(limit * 3).lean();
       for (const d of docs2) {
         const s = d?.nombre?.trim();
-        if (s && !set.has(s.toLowerCase())) {
-          set.add(s.toLowerCase());
-          out.push(s);
-          if (out.length >= limit) break;
-        }
+        if (s && !set.has(s.toLowerCase())) { set.add(s.toLowerCase()); out.push(s); if (out.length >= limit) break; }
       }
     }
-
     return res.json(out.slice(0, limit));
   } catch (e) {
     console.error("GET /suggest ERROR:", e);
@@ -452,40 +341,24 @@ router.get("/suggest", async (req, res) => {
   }
 });
 
-// -------------------------
-// LISTADO GENERAL (array plano)
-// -------------------------
+/* ========================== LISTADO ========================== */
 router.get("/", async (req, res) => {
   try {
-    const {
-      categoria,
-      subcategoria,
-      destacado,
-      q,
-      sort = "fecha-desc",
-      limit = "100",
-    } = req.query;
-
+    const { categoria, subcategoria, destacado, q, sort = "fecha-desc", limit = "100" } = req.query;
     const filtro = {};
     const and = [];
-
     const cat = categoria ? String(categoria).toLowerCase() : "";
     const sub = subcategoria ? String(subcategoria).toLowerCase() : "";
 
     if (cat === "nuevos-ingresos") {
-      and.push({
-        $or: [
-          { $expr: { $eq: [{ $toLower: "$categoria" }, "nuevos-ingresos"] } },
-          { tags: "nuevos-ingresos" },
-          { tags: /nuev/i },
-        ],
-      });
+      and.push({ $or: [
+        { $expr: { $eq: [{ $toLower: "$categoria" }, "nuevos-ingresos"] } },
+        { tags: "nuevos-ingresos" },
+        { tags: /nuev/i },
+      ]});
     } else {
       if (cat) and.push({ $expr: { $eq: [{ $toLower: "$categoria" }, cat] } });
-      if (sub)
-        and.push({
-          $expr: { $eq: [{ $toLower: "$subcategoria" }, sub] },
-        });
+      if (sub) and.push({ $expr: { $eq: [{ $toLower: "$subcategoria" }, sub] } });
     }
 
     if (destacado === "true") and.push({ destacado: true });
@@ -493,33 +366,19 @@ router.get("/", async (req, res) => {
     if (q && String(q).trim() !== "") {
       const esc = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const regex = new RegExp(esc(String(q).trim()), "i");
-      and.push({
-        $or: [
-          { nombre: regex },
-          { descripcion: regex },
-          { categoria: regex },
-          { subcategoria: regex },
-          { tags: regex },
-        ],
-      });
+      and.push({ $or: [{ nombre: regex }, { descripcion: regex }, { categoria: regex }, { subcategoria: regex }, { tags: regex }] });
     }
 
     if (and.length) filtro.$and = and;
-
     const query = withVis(req, filtro);
-
     const sortMap = {
       "fecha-desc": { createdAt: -1 },
       "precio-asc": { precio: 1 },
       "precio-desc": { precio: -1 },
       "nombre-asc": { nombre: 1 },
     };
-    const sortQuery = sortMap[sort] || sortMap["fecha-desc"];
-
     const limitNum = Math.max(1, Math.min(200, toInt(limit, 100)));
-
-    const items = await Producto.find(query).sort(sortQuery).limit(limitNum);
-
+    const items = await Producto.find(query).sort(sortMap[sort] || sortMap["fecha-desc"]).limit(limitNum);
     res.json(items);
   } catch (e) {
     console.error("GET / (lista) ERROR:", e);
@@ -527,13 +386,10 @@ router.get("/", async (req, res) => {
   }
 });
 
-// -------------------------
-// UPDATE (acepta porcentaje de promo)
-// -------------------------
+/* ========================== UPDATE ========================== */
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-
     const doc = await Producto.findById(id);
     if (!doc) return res.status(404).json({ message: "No encontrado" });
 
@@ -552,64 +408,50 @@ router.put("/:id", async (req, res) => {
       };
     }
 
-    // NUEVO: si viene porcentaje, lo convertimos a precio
     if (
       Object.prototype.hasOwnProperty.call(req.body, "promoPct") ||
       Object.prototype.hasOwnProperty.call(req.body, "promoPorcentaje")
     ) {
       const pct = parsePct(req.body.promoPct ?? req.body.promoPorcentaje);
-      const active =
-        Object.prototype.hasOwnProperty.call(req.body, "promoActivo") ?
-          !!req.body.promoActivo :
-          true;
-
-      const base = Object.prototype.hasOwnProperty.call(req.body, "precio")
-        ? parsePrecio(req.body.precio)
-        : doc.precio;
-
+      const active = Object.prototype.hasOwnProperty.call(req.body, "promoActivo") ? !!req.body.promoActivo : true;
+      const base = Object.prototype.hasOwnProperty.call(req.body, "precio") ? parsePrecio(req.body.precio) : doc.precio;
       if (pct !== null && active) {
         const precioCalc = Math.max(0, Math.round(base * (1 - pct / 100)));
-        if (!(precioCalc < base)) {
-          return res.status(400).json({ message: "El porcentaje no genera un precio menor al base" });
-        }
+        if (!(precioCalc < base)) return res.status(400).json({ message: "El porcentaje no genera un precio menor al base" });
         req.body.promo = { ...(req.body.promo || {}), active: true, precio: precioCalc, pct };
       } else if (pct !== null && !active) {
         req.body.promo = { ...(req.body.promo || {}), active: false, precio: null, pct };
       }
     }
 
-    if (Object.prototype.hasOwnProperty.call(req.body, "visible")) {
-      req.body.visible = parseBool(req.body.visible);
-    }
-
-    if (req.body.categoria)
-      req.body.categoria = String(req.body.categoria).toLowerCase();
-    if (req.body.subcategoria)
-      req.body.subcategoria = String(req.body.subcategoria).toLowerCase();
-    if (req.body.promo && req.body.promo.precio !== undefined) {
-      req.body.promo.precio = parsePrecio(req.body.promo.precio);
-    }
+    if (Object.prototype.hasOwnProperty.call(req.body, "visible")) req.body.visible = parseBool(req.body.visible);
+    if (req.body.categoria)    req.body.categoria    = String(req.body.categoria).toLowerCase();
+    if (req.body.subcategoria) req.body.subcategoria = String(req.body.subcategoria).toLowerCase();
+    if (req.body.promo?.precio !== undefined) req.body.promo.precio = parsePrecio(req.body.promo.precio);
     if (req.body.precio !== undefined) {
       const pbase = parsePrecio(req.body.precio);
-      if (pbase === null)
-        return res.status(400).json({ message: "Precio base inválido" });
+      if (pbase === null) return res.status(400).json({ message: "Precio base inválido" });
       req.body.precio = pbase;
     }
-    if (req.body.precioOriginal !== undefined) {
-      req.body.precioOriginal = parsePrecio(req.body.precioOriginal);
-    }
+    if (req.body.precioOriginal !== undefined) req.body.precioOriginal = parsePrecio(req.body.precioOriginal);
 
-    // Variantes — acepto req.body.variants o req.body.variantes; NO recalculo stock
     const rawVariants = req.body.variants ?? req.body.variantes;
-    if (rawVariants !== undefined) {
-      const variants = normalizeVariants(rawVariants);
-      req.body.variants = variants;
-    }
+    if (rawVariants !== undefined) req.body.variants = normalizeVariants(rawVariants);
 
+    // ── ALLOW LIST COMPLETA (incluye 3 precios + #8 cajas/tonos) ──────────────
     const allow = [
       "nombre",
       "precio",
       "precioOriginal",
+      // ← #7 Sistema de 3 precios
+      "precioEspecial",
+      "precioMayorista",
+      // ← #8 Venta por caja + tonos
+      "unidadesPorCaja",
+      "cantidadTonos",
+      "modoTonos",
+      "tonosDisponibles",
+      // ── resto ──
       "imagen",
       "descripcion",
       "categoria",
@@ -619,19 +461,24 @@ router.put("/:id", async (req, res) => {
       "tags",
       "promo",
       "visible",
-      "variants", // 👈
+      "variants",
       "sku",
     ];
 
     const patch = {};
     for (const k of allow) {
-      if (req.body[k] !== undefined) patch[k] = req.body[k];
+      if (req.body[k] !== undefined) {
+        // Parseo especial para los campos numéricos opcionales
+        if (["precioEspecial", "precioMayorista", "unidadesPorCaja", "cantidadTonos"].includes(k)) {
+          const parsed = parseOptionalNum(req.body[k]);
+          patch[k] = parsed; // null si viene vacío
+        } else {
+          patch[k] = req.body[k];
+        }
+      }
     }
 
-    const updated = await Producto.findByIdAndUpdate(id, patch, {
-      new: true,
-      runValidators: true,
-    });
+    const updated = await Producto.findByIdAndUpdate(id, patch, { new: true, runValidators: true });
     res.json(updated);
   } catch (e) {
     console.error("PUT /:id ERROR:", e);
@@ -639,16 +486,12 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// PATCH visible
+/* ========================== PATCH VISIBLE ========================== */
 router.patch("/:id/visible", async (req, res) => {
   try {
     const { id } = req.params;
     const visible = parseBool(req.body.visible);
-    const updated = await Producto.findByIdAndUpdate(
-      id,
-      { visible },
-      { new: true, runValidators: true }
-    );
+    const updated = await Producto.findByIdAndUpdate(id, { visible }, { new: true, runValidators: true });
     if (!updated) return res.status(404).json({ message: "No encontrado" });
     res.json(updated);
   } catch (e) {
@@ -657,22 +500,16 @@ router.patch("/:id/visible", async (req, res) => {
   }
 });
 
-// DETALLE
+/* ========================== DETALLE ========================== */
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-
     const p = await Producto.findById(id).catch((e) => {
       if (e?.name === "CastError") return null;
       throw e;
     });
     if (!p) return res.status(404).json({ message: "No encontrado" });
-
-    if (!isAdminReq(req)) {
-      const notHidden = p.visible !== false;
-      if (!notHidden) return res.status(404).json({ message: "No encontrado" });
-    }
-
+    if (!isAdminReq(req) && p.visible === false) return res.status(404).json({ message: "No encontrado" });
     res.json(p);
   } catch (e) {
     console.error("GET /:id ERROR:", e);
@@ -680,22 +517,19 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// 🔴 DELETE definitivo (con logs)
+/* ========================== DELETE ========================== */
 router.delete("/:id", async (req, res) => {
   const { id } = req.params;
   try {
     console.log("[DELETE producto] id =", id);
-
     const deleted = await Producto.findByIdAndDelete(id).catch((e) => {
-      if (e?.name === "CastError") return null; // id inválido -> 404 estándar
+      if (e?.name === "CastError") return null;
       throw e;
     });
-
     if (!deleted) {
       console.warn("[DELETE producto] no encontrado:", id);
       return res.status(404).json({ ok: false, message: "No encontrado" });
     }
-
     console.log("[DELETE producto] OK:", deleted._id?.toString());
     return res.json({ ok: true, id: deleted._id?.toString(), message: "Eliminado" });
   } catch (e) {

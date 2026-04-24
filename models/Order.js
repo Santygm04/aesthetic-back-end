@@ -60,7 +60,7 @@ const OrderSchema = new mongoose.Schema(
     // ✅ agregamos rejected (tu UI lo usa y MP puede rechazar)
     status: {
       type: String,
-      enum: ["pending", "paid", "rejected", "cancelled"],
+      enum: ["pending", "paid", "rejected", "cancelled", "deleted"],
       default: "pending",
     },
 
@@ -89,6 +89,9 @@ const OrderSchema = new mongoose.Schema(
 
     // para no descontar stock 2 veces
     stockAdjusted: { type: Boolean, default: false },
+
+    // soft-delete: fecha en que se marcó como eliminada
+    deletedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

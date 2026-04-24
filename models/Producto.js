@@ -5,74 +5,73 @@ const PromoSchema = new mongoose.Schema(
   {
     active: { type: Boolean, default: false },
     precio: { type: Number, min: 0, default: null },
-    desde: { type: Date, default: null },
-    hasta: { type: Date, default: null },
+    desde:  { type: Date, default: null },
+    hasta:  { type: Date, default: null },
     etiqueta: { type: String, default: null },
   },
   { _id: false }
 );
 
-/**
- * Variantes (talle + color)
- * - price: precio específico de la variante (si no, usa precio base)
- * - stock: stock de la variante
- * - vid: id corto estable de la variante (para identificarla en carrito/órdenes)
- */
 const VariantSchema = new mongoose.Schema(
   {
-    vid: { type: String, required: true }, // ej: "m-negro-8fj2"
-    size: { type: String, trim: true }, // talle
-    color: { type: String, trim: true }, // nombre de color o código
+    vid:   { type: String, required: true },
+    size:  { type: String, trim: true },
+    color: { type: String, trim: true },
     stock: { type: Number, default: 0, min: 0 },
     price: { type: Number, min: 0, default: null },
-    sku: { type: String, default: undefined },
+    sku:   { type: String, default: undefined },
   },
   { _id: false }
 );
 
 const ProductoSchema = new mongoose.Schema(
   {
-    nombre: { type: String, required: true, trim: true },
-    precio: { type: Number, required: true, min: 0 }, // precio base
-    precioOriginal: { type: Number, min: 0, default: undefined },
-    imagen: { type: String, default: "" },
+    nombre:       { type: String, required: true, trim: true },
+
+    // ── SISTEMA DE 3 PRECIOS ──────────────────────────────────────
+    // precio        = Precio Unitario  (sin mínimo de compra)
+    // precioEspecial= Precio Especial  (comprando 5+ productos distintos)
+    // precioMayorista= Precio Mayorista (compra mínima $30.000 en subtotal)
+    // precioOriginal = precio "tachado" de referencia (opcional)
+    precio:          { type: Number, required: true, min: 0 },
+    precioEspecial:  { type: Number, min: 0, default: null }, // null = no aplica
+    precioMayorista: { type: Number, min: 0, default: null }, // null = no aplica
+    precioOriginal:  { type: Number, min: 0, default: undefined },
+    // ─────────────────────────────────────────────────────────────
+
+    imagen:      { type: String, default: "" },
     descripcion: { type: String, default: "" },
-    categoria: { type: String, index: true, default: "" },
-    subcategoria: { type: String, index: true, default: "" },
+    categoria:   { type: String, index: true, default: "" },
+    subcategoria:{ type: String, index: true, default: "" },
 
-    // Stock global (si hay variantes se guarda SUMA de variantes)
-    stock: { type: Number, default: 0, min: 0 },
-
-    // Variantes
+    stock:    { type: Number, default: 0, min: 0 },
     variants: { type: [VariantSchema], default: [] },
 
-    sku: { type: String, default: undefined },
+    // ── #8 VENTA POR CAJA ────────────────────────────────────────
+    unidadesPorCaja: { type: Number, min: 1, default: null }, // null = venta unitaria normal
+    // ── #8 SELECTOR DE TONOS ─────────────────────────────────────
+    cantidadTonos:   { type: Number, min: 1, max: 5, default: null }, // null = sin tonos
+    // "automatico" → distribución pareja | "manual" → admin carga tonos fijos
+    modoTonos:       { type: String, enum: ["automatico", "manual"], default: "automatico" },
+    tonosDisponibles:{ type: [String], default: [] }, // ej: ["Tono 1","Tono 2","Tono 3"]
+    // ─────────────────────────────────────────────────────────────
+
+    sku:       { type: String, default: undefined },
     destacado: { type: Boolean, default: false },
-    tags: { type: [String], default: [] },
-    promo: { type: PromoSchema, default: undefined },
-    visible: { type: Boolean, default: true },
+    tags:      { type: [String], default: [] },
+    promo:     { type: PromoSchema, default: undefined },
+    visible:   { type: Boolean, default: true },
   },
   { timestamps: true }
 );
 
-/**
- * ✅ Plugin realtime (Mongoose plugin, acá está perfecto)
- * OJO: este require es correcto porque Producto.js está en /models
- * y el plugin está en /models/plugins
- */
 const productRealtimePlugin = require("./plugins/productRealtime");
 ProductoSchema.plugin(productRealtimePlugin);
 
-// Índice de texto para /search
 ProductoSchema.index({
-  nombre: "text",
-  descripcion: "text",
-  categoria: "text",
-  subcategoria: "text",
-  tags: "text",
+  nombre: "text", descripcion: "text",
+  categoria: "text", subcategoria: "text", tags: "text",
 });
-
-// Por si hacés bastante filtro por visible/stock
 ProductoSchema.index({ visible: 1, stock: 1 });
 
 module.exports = mongoose.model("Producto", ProductoSchema);

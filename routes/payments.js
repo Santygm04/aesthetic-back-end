@@ -757,7 +757,17 @@ router.get("/orders", async (req, res) => {
 
     const status = String(req.query.status || "").trim();
     const q = {};
-    if (status) q.status = status;
+
+    if (status === "deleted") {
+      // Solo mostrar eliminadas cuando se pide explícitamente
+      q.status = "deleted";
+    } else if (status) {
+      // Filtro específico (pending, paid, etc.)
+      q.status = status;
+    } else {
+      // "Todas" → excluir las eliminadas para no contaminar la vista
+      q.status = { $ne: "deleted" };
+    }
 
     const orders = await Order.find(q)
       .sort({ createdAt: -1 })
@@ -877,7 +887,7 @@ router.post("/order/:id/delivered", async (req, res) => {
 });
 
 /* ===========================
- *  ELIMINAR orden (solo canceladas)
+ *  ELIMINAR orden (soft-delete → status: deleted)
  * =========================== */
 router.delete("/order/:id", async (req, res) => {
   try {
@@ -886,11 +896,12 @@ router.delete("/order/:id", async (req, res) => {
     const o = await Order.findById(req.params.id);
     if (!o) return res.status(404).json({ message: "No encontrado" });
 
-    if (o.status !== "cancelled") {
-      return res.status(400).json({ message: "Solo se pueden eliminar órdenes canceladas" });
-    }
+    // Soft-delete: cambia el status a "deleted" en lugar de borrar de la DB
+    // Así aparece en el filtro "Eliminadas" del panel admin
+    o.status = "deleted";
+    o.deletedAt = new Date();
+    await o.save();
 
-    await Order.deleteOne({ _id: o._id });
     return res.json({ ok: true, id: String(o._id) });
   } catch (e) {
     console.error("delete order error:", e);

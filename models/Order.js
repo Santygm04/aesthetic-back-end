@@ -51,8 +51,11 @@ const OrderSchema = new mongoose.Schema(
     buyer: {
       nombre: String,
       email: String,
-      direccion: String, // legacy opcional
+      direccion: String,
       telefono: String,
+      dni: String,
+      empresa: String,
+      notas: String,
     },
     items: { type: [ItemSchema], default: [] },
     total: { type: Number, required: true },

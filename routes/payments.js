@@ -1030,4 +1030,50 @@ router.get("/orders/public/lookup", async (req, res) => {
   }
 });
 
+/* =========================================================
+ *  PÚBLICO: buscar órdenes por email, teléfono o DNI
+ * ========================================================= */
+router.get("/orders/public/by-buyer", async (req, res) => {
+  try {
+    const email = String(req.query.email || "").trim();
+    const phone = String(req.query.phone || "").replace(/\D/g, "");
+    const dni   = String(req.query.dni   || "").replace(/\D/g, "");
+
+    if (!email && !phone && !dni) {
+      return res.status(400).json({ message: "Falta email, teléfono o DNI" });
+    }
+
+    const $or = [];
+    if (email) $or.push({ "buyer.email": new RegExp(`^${email}$`, "i") });
+    if (phone) $or.push({ "buyer.telefono": new RegExp(phone.slice(-7)) });
+    if (dni)   $or.push({ "buyer.dni": new RegExp(`^${dni}$`) });
+
+    const list = await Order.find({ $or, status: { $ne: "deleted" } })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean();
+
+    const safe = list.map(o => ({
+      _id:           String(o._id),
+      status:        o.status,
+      paymentMethod: o.paymentMethod,
+      total:         o.total,
+      shipping:      o.shipping,
+      shippingTicket: o.shippingTicket,
+      orderNumber:   o.orderNumber,
+      createdAt:     o.createdAt,
+      items: (o.items || []).map(it => ({
+        nombre: it.nombre, cantidad: it.cantidad,
+        precio: it.precio, subtotal: it.subtotal,
+        variant: it.variant,
+      })),
+    }));
+
+    return res.json(safe);
+  } catch (e) {
+    console.error("GET /orders/public/by-buyer error:", e);
+    res.status(500).json({ message: "Error" });
+  }
+});
+
 module.exports = router;

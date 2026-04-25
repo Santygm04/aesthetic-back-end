@@ -538,4 +538,87 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+/* ========================== SITEMAP ========================== */
+router.get("/sitemap", async (req, res) => {
+  try {
+    const items = await Producto.find(
+      { visible: { $ne: false }, stock: { $gt: 0 } },
+      { _id: 1, nombre: 1, updatedAt: 1 }
+    ).lean();
+
+    const frontBase = (process.env.FRONT_URL || "https://aestheticmakeup.com.ar").replace(/\/$/, "");
+
+    const urls = items.map(p =>
+      `  <url>\n    <loc>${frontBase}/producto/${p._id}</loc>\n    <lastmod>${new Date(p.updatedAt).toISOString().split("T")[0]}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`
+    ).join("\n");
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>${frontBase}/</loc>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>${frontBase}/category/skincare</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>${frontBase}/category/maquillaje</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>${frontBase}/category/marroquineria</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>${frontBase}/category/lenceria</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>${frontBase}/category/bijouterie</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>${frontBase}/category/uñas</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>${frontBase}/category/pestañas</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>${frontBase}/category/accesorios</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>${frontBase}/contacto</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>${frontBase}/envios</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+${urls}
+</urlset>`;
+
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.send(xml);
+  } catch (e) {
+    console.error("GET /sitemap ERROR:", e);
+    res.status(500).send("Error generando sitemap");
+  }
+});
+
 module.exports = router;

@@ -109,6 +109,36 @@ app.use("/api/payments/stats/snapshot", require("./routes/stats_snapshots"));
 // Stats en vivo + SSE
 app.use("/api/payments", require("./routes/stats"));
 
+/* ============ SITEMAP DINÁMICO DE PRODUCTOS ============ */
+app.get("/sitemap-productos.xml", async (req, res) => {
+  try {
+    const items = await Producto.find(
+      { visible: { $ne: false }, stock: { $gt: 0 } },
+      { _id: 1, nombre: 1, updatedAt: 1 }
+    ).lean();
+
+    const frontBase = (process.env.FRONT_URL || "https://aestheticmakeup.com.ar").replace(/\/$/, "");
+
+    const urls = items.map(p =>
+      `  <url>\n    <loc>${frontBase}/producto/${p._id}</loc>\n    <lastmod>${new Date(p.updatedAt).toISOString().split("T")[0]}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`
+    ).join("\n");
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls}
+</urlset>`;
+
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.send(xml);
+  } catch (e) {
+    console.error("GET /sitemap-productos.xml ERROR:", e);
+    res.status(500).send("Error generando sitemap");
+  }
+});
+
+app.use("/api/productos", productosRoutes);
+
 /**
  * 👇 2) Resto de rutas
  */

@@ -886,6 +886,18 @@ router.post("/order/:id/delivered", async (req, res) => {
   }
 });
 
+router.delete("/order/:id/permanent", async (req, res) => {
+  try {
+    if (!isAdmin(req)) return res.status(401).json({ message: "No autorizado" });
+    const o = await Order.findByIdAndDelete(req.params.id);
+    if (!o) return res.status(404).json({ message: "No encontrado" });
+    return res.json({ ok: true, id: String(o._id) });
+  } catch (e) {
+    console.error("DELETE permanent error:", e);
+    res.status(500).json({ message: "Error al eliminar permanentemente" });
+  }
+});
+
 /* ===========================
  *  ELIMINAR orden (soft-delete → status: deleted)
  * =========================== */

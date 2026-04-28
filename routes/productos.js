@@ -351,12 +351,10 @@ router.get("/", async (req, res) => {
     const sub = subcategoria ? String(subcategoria).toLowerCase() : "";
 
     if (cat === "nuevos-ingresos") {
-      and.push({ $or: [
-        { $expr: { $eq: [{ $toLower: "$categoria" }, "nuevos-ingresos"] } },
-        { tags: "nuevos-ingresos" },
-        { tags: /nuev/i },
-      ]});
-    } else {
+  and.push({ $or: [
+    { tags: "nuevos-ingresos" },
+  ]});
+}else {
       if (cat) and.push({ $expr: { $eq: [{ $toLower: "$categoria" }, cat] } });
       if (sub) and.push({ $expr: { $eq: [{ $toLower: "$subcategoria" }, sub] } });
     }

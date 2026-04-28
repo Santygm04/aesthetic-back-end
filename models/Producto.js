@@ -58,7 +58,7 @@ const ProductoSchema = new mongoose.Schema(
 
     sku:       { type: String, default: undefined },
     destacado: { type: Boolean, default: false },
-    tags:      { type: [String], default: [] },
+    tags: { type: [String], default: ["nuevos-ingresos"] },
     promo:     { type: PromoSchema, default: undefined },
     visible:   { type: Boolean, default: true },
   },

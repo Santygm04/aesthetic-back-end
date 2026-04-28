@@ -387,19 +387,22 @@ router.post("/transfer", upload.single("comprobante"), async (req, res) => {
       const subtotal = Number((precio * cantidad).toFixed(2));
 
       return {
-        productId: i.productId || undefined,
-        nombre: i.nombre,
-        precio,
-        cantidad,
-        subtotal,
-
-        // 🔥 ESTO ES LO IMPORTANTE
-        distribucionTonos: i.distribucionTonos || [],
-
-        unidadesPorCaja: i.unidadesPorCaja || 1,
-
-        variant: i.variant || undefined,
-      };
+  productId: i.productId || undefined,
+  nombre: i.nombre,
+  precio,
+  cantidad,
+  subtotal,
+  distribucionTonos: Array.isArray(i.distribucionTonos) ? i.distribucionTonos : [],
+  unidadesPorCaja: i.unidadesPorCaja || 1,
+  variant: i.variant
+    ? {
+        vid:   i.variant.vid   || undefined,
+        size:  i.variant.size  || undefined,
+        color: i.variant.color || undefined,
+        tono:  i.variant.tono  || undefined,
+      }
+    : undefined,
+};
     });
 
     // ✅ Total calculado desde items (fuente de verdad)
@@ -536,13 +539,22 @@ router.post("/mp/create-preference", async (req, res) => {
       const subtotal = Number((precio * cantidad).toFixed(2));
 
       return {
-        productId: i.productId || undefined,
-        nombre: i.nombre,
-        precio,
-        cantidad,
-        subtotal,
-        variant: i.variant || undefined,
-      };
+  productId: i.productId || undefined,
+  nombre: i.nombre,
+  precio,
+  cantidad,
+  subtotal,
+  distribucionTonos: Array.isArray(i.distribucionTonos) ? i.distribucionTonos : [],
+  unidadesPorCaja: i.unidadesPorCaja || 1,
+  variant: i.variant
+    ? {
+        vid:   i.variant.vid   || undefined,
+        size:  i.variant.size  || undefined,
+        color: i.variant.color || undefined,
+        tono:  i.variant.tono  || undefined,
+      }
+    : undefined,
+};
     });
 
     // ✅ total REAL desde items

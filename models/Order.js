@@ -23,6 +23,7 @@
       vid: String,
       size: String,
       color: String,
+      tono: String,
     },
   },
   { _id: false }

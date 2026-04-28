@@ -1097,7 +1097,10 @@ router.get("/mas-vendidos", async (req, res) => {
     const result = await Order.aggregate([
       { $match: { status: "paid" } },
       { $unwind: "$items" },
-      { $match: { "items.productId": { $exists: true, $ne: null } } },
+      { $match: { 
+       "items.productId": { $exists: true, $ne: null },
+        "items.cantidad":  { $exists: true, $gt: 0 },
+        }},
       {
         $group: {
           _id:          "$items.productId",

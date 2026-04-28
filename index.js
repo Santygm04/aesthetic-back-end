@@ -137,7 +137,7 @@ ${urls}
   }
 });
 
-app.use("/api/productos", productosRoutes);
+
 
 /**
  * 👇 2) Resto de rutas

@@ -226,12 +226,8 @@ router.get("/stats", async (req, res) => {
     ]);
 
     const nuevosBase = {
-      $or: [
-        { $expr: { $eq: [categoriaNormExpr, "nuevos-ingresos"] } },
-        { tags: "nuevos-ingresos" },
-        { tags: { $regex: "nuev", $options: "i" } },
-      ],
-    };
+  tags: "nuevos-ingresos",
+};
     const nuevosMatch = withVis(req, nuevosBase);
 
     const [nuevosCount, ultimoNuevo] = await Promise.all([

@@ -392,6 +392,12 @@ router.post("/transfer", upload.single("comprobante"), async (req, res) => {
         precio,
         cantidad,
         subtotal,
+
+        // 🔥 ESTO ES LO IMPORTANTE
+        distribucionTonos: i.distribucionTonos || [],
+
+        unidadesPorCaja: i.unidadesPorCaja || 1,
+
         variant: i.variant || undefined,
       };
     });

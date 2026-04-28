@@ -2,21 +2,31 @@
   const mongoose = require("mongoose");
 
   const ItemSchema = new mongoose.Schema(
-    {
-      productId: { type: mongoose.Schema.Types.ObjectId, ref: "Producto" },
-      nombre: String,
-      precio: Number,
-      cantidad: Number,
-      subtotal: Number,
-      // info de variante (opcional)
-      variant: {
-        vid: String,
-        size: String,
-        color: String,
+  {
+    productId: { type: mongoose.Schema.Types.ObjectId, ref: "Producto" },
+    nombre: String,
+    precio: Number,
+    cantidad: Number,
+    subtotal: Number,
+
+    // 🟣 NUEVO: TONOS
+    distribucionTonos: [
+      {
+        tono: String,
+        cantidad: Number,
       },
+    ],
+
+    unidadesPorCaja: Number,
+
+    variant: {
+      vid: String,
+      size: String,
+      color: String,
     },
-    { _id: false }
-  );
+  },
+  { _id: false }
+);
 
   const AddressSchema = new mongoose.Schema(
     {

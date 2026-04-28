@@ -1088,4 +1088,63 @@ router.get("/orders/public/by-buyer", async (req, res) => {
   }
 });
 
+router.get("/mas-vendidos", async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const page  = Math.max(parseInt(req.query.page)  || 1, 1);
+    const skip  = (page - 1) * limit;
+
+    const result = await Order.aggregate([
+      { $match: { status: "paid" } },
+      { $unwind: "$items" },
+      { $match: { "items.productId": { $exists: true, $ne: null } } },
+      {
+        $group: {
+          _id:          "$items.productId",
+          totalVendido: { $sum: "$items.cantidad" },
+          nombre:       { $first: "$items.nombre" },
+        },
+      },
+      { $sort: { totalVendido: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      {
+        $lookup: {
+          from:         "productos",
+          localField:   "_id",
+          foreignField: "_id",
+          as:           "producto",
+        },
+      },
+      { $unwind: { path: "$producto", preserveNullAndEmpty: false } },
+      {
+        $replaceRoot: {
+          newRoot: {
+            $mergeObjects: [
+              "$producto",
+              { totalVendido: "$totalVendido" },
+            ],
+          },
+        },
+      },
+    ]);
+
+    const totalDocs = await Order.aggregate([
+      { $match: { status: "paid" } },
+      { $unwind: "$items" },
+      { $match: { "items.productId": { $exists: true, $ne: null } } },
+      { $group: { _id: "$items.productId" } },
+      { $count: "total" },
+    ]);
+
+    const total = totalDocs[0]?.total || 0;
+    const pages = Math.ceil(total / limit);
+
+    return res.json({ ok: true, items: result, page, pages, total });
+  } catch (e) {
+    console.error("GET /mas-vendidos error:", e);
+    res.status(500).json({ message: "Error al obtener más vendidos" });
+  }
+});
+
 module.exports = router;

@@ -1097,56 +1097,48 @@ router.get("/mas-vendidos", async (req, res) => {
     const result = await Order.aggregate([
       { $match: { status: "paid" } },
       { $unwind: "$items" },
-      { $match: { 
-       "items.productId": { $exists: true, $ne: null },
-        "items.cantidad":  { $exists: true, $gt: 0 },
-        }},
       {
         $group: {
           _id:          "$items.productId",
-          totalVendido: { $sum: "$items.cantidad" },
+          totalVendido: { $sum: { $ifNull: ["$items.cantidad", 0] } },
           nombre:       { $first: "$items.nombre" },
         },
       },
+      { $match: { _id: { $ne: null } } },
       { $sort: { totalVendido: -1 } },
-      { $skip: skip },
-      { $limit: limit },
-      {
-        $lookup: {
-          from:         "productos",
-          localField:   "_id",
-          foreignField: "_id",
-          as:           "producto",
-        },
-      },
-      { $unwind: { path: "$producto", preserveNullAndEmpty: false } },
-      {
-        $replaceRoot: {
-          newRoot: {
-            $mergeObjects: [
-              "$producto",
-              { totalVendido: "$totalVendido" },
-            ],
-          },
-        },
-      },
     ]);
 
-    const totalDocs = await Order.aggregate([
-      { $match: { status: "paid" } },
-      { $unwind: "$items" },
-      { $match: { "items.productId": { $exists: true, $ne: null } } },
-      { $group: { _id: "$items.productId" } },
-      { $count: "total" },
-    ]);
+    const total = result.length;
+    const pages = Math.max(1, Math.ceil(total / limit));
+    const paginated = result.slice(skip, skip + limit);
 
-    const total = totalDocs[0]?.total || 0;
-    const pages = Math.ceil(total / limit);
+    // Buscar los productos reales por sus IDs
+    const mongoose = require("mongoose");
+    const Producto = require("../models/Producto");
 
-    return res.json({ ok: true, items: result, page, pages, total });
+    const ids = paginated
+      .map(r => {
+        try { return new mongoose.Types.ObjectId(String(r._id)); } catch { return null; }
+      })
+      .filter(Boolean);
+
+    const productos = await Producto.find({ _id: { $in: ids } }).lean();
+
+    const productoMap = {};
+    productos.forEach(p => { productoMap[String(p._id)] = p; });
+
+    const items = paginated
+      .map(r => {
+        const p = productoMap[String(r._id)];
+        if (!p) return null;
+        return { ...p, totalVendido: r.totalVendido };
+      })
+      .filter(Boolean);
+
+    return res.json({ ok: true, items, page, pages, total });
   } catch (e) {
     console.error("GET /mas-vendidos error:", e);
-    res.status(500).json({ message: "Error al obtener más vendidos" });
+    res.status(500).json({ message: "Error al obtener más vendidos", detail: e.message });
   }
 });
 

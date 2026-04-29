@@ -50,7 +50,7 @@ const WSP_TEMPLATE_TRANSFER = process.env.WHATSAPP_TEMPLATE_TRANSFER || "";
 const WSP_TEMPLATE_LANG = process.env.WHATSAPP_TEMPLATE_LANG || "es_AR";
 
 // Admin / Webhook secrets
-const ADMIN_SECRET = process.env.ADMIN_SECRET || "";
+const ADMIN_SECRET = (process.env.ADMIN_SECRET || "").trim();
 const BANK_WEBHOOK_SECRET = process.envBANK_WEBHOOK_SECRET || process.env.BANK_WEBHOOK_SECRET || "";
 const JWT_SECRET = process.env.JWT_SECRET || "cambia-esto"; // 👈 NUEVO
 
@@ -750,7 +750,14 @@ function isAdmin(req) {
   const fromHeader = (req.headers["x-admin-secret"] || "").trim();
   const fromBody = (req.body?.secret || "").trim();
   const s = fromHeader || fromBody;
-  return Boolean(ADMIN_SECRET) && s === ADMIN_SECRET;
+  console.log("[isAdmin] secret recibido:", JSON.stringify(s));
+  console.log("[isAdmin] ADMIN_SECRET en env:", JSON.stringify(ADMIN_SECRET));
+  console.log("[isAdmin] coinciden:", s === ADMIN_SECRET);
+  if (!ADMIN_SECRET) {
+    console.warn("[isAdmin] ADVERTENCIA: ADMIN_SECRET está vacío en el entorno");
+    return false;
+  }
+  return s === ADMIN_SECRET;
 }
 
 /* ===========================

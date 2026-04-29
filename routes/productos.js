@@ -341,6 +341,10 @@ router.get("/suggest", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const { categoria, subcategoria, destacado, q, sort = "fecha-desc", limit = "100", tag } = req.query;
+    const filtro = {};
+    const and = [];
+    const cat = categoria ? String(categoria).toLowerCase() : "";
+    const sub = subcategoria ? String(subcategoria).toLowerCase() : "";
 
     // Si viene tag=nuevos-ingresos, forzar filtro estricto por tag
     if (tag === "nuevos-ingresos") {
@@ -348,10 +352,10 @@ router.get("/", async (req, res) => {
       const limitNum = Math.max(1, Math.min(200, toInt(limit, 100)));
       const items = await Producto.find(query).sort({ createdAt: -1 }).limit(limitNum);
       return res.json(items);
-    }else {
-      if (cat) and.push({ $expr: { $eq: [{ $toLower: "$categoria" }, cat] } });
-      if (sub) and.push({ $expr: { $eq: [{ $toLower: "$subcategoria" }, sub] } });
     }
+
+    if (cat) and.push({ $expr: { $eq: [{ $toLower: "$categoria" }, cat] } });
+    if (sub) and.push({ $expr: { $eq: [{ $toLower: "$subcategoria" }, sub] } });
 
     if (destacado === "true") and.push({ destacado: true });
 

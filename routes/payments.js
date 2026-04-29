@@ -146,13 +146,16 @@ function buildOrderWhatsAppText(order) {
       : "Retiro en local";
 
   const itemsLines = (order.items || [])
-    .map((it) => {
-      const varPart = it?.variant?.size || it?.variant?.color
-        ? ` (${[it?.variant?.size, it?.variant?.color].filter(Boolean).join(" / ")})`
-        : "";
-      return `• ${it.nombre}${varPart} x${it.cantidad} — ${ars(it.subtotal)}`;
-    })
-    .join("\n");
+  .map((it) => {
+    const varPart = it?.variant?.size || it?.variant?.color || it?.variant?.tono
+      ? ` (${[it?.variant?.size, it?.variant?.color, it?.variant?.tono].filter(Boolean).join(" / ")})`
+      : "";
+    const tonosPart = Array.isArray(it?.distribucionTonos) && it.distribucionTonos.length
+      ? "\n  " + it.distribucionTonos.map(t => `${t.tono}: ${t.cantidad} u.`).join(" | ")
+      : "";
+    return `• ${it.nombre}${varPart} x${it.cantidad} — ${ars(it.subtotal)}${tonosPart}`;
+  })
+  .join("\n");
 
   const simpleCode = order?.orderNumber ? `#${order.orderNumber}` : null;
 

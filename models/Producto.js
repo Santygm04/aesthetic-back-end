@@ -36,6 +36,9 @@ const ProductoSchema = new mongoose.Schema(
     precio:          { type: Number, required: true, min: 0 },
     precioEspecial:  { type: Number, min: 0, default: null }, // null = no aplica
     precioMayorista: { type: Number, min: 0, default: null }, // null = no aplica
+    minimoMayorista: { type: Number, min: 1, default: null },
+// null = usa el sistema global ($30.000)
+// 6    = mayorista a partir de 6 unidades (lencería)
     precioOriginal:  { type: Number, min: 0, default: undefined },
     // ─────────────────────────────────────────────────────────────
 

@@ -160,6 +160,7 @@ router.post("/", async (req, res) => {
       // ── 3 PRECIOS ──────────────────────────────────────────────
       precioEspecial:  parseOptionalNum(b.precioEspecial)  ?? null,
       precioMayorista: parseOptionalNum(b.precioMayorista) ?? null,
+      minimoMayorista: parseOptionalNum(b.minimoMayorista) ?? null,
       // ── #8 CAJAS + TONOS ───────────────────────────────────────
       unidadesPorCaja:  parseOptionalNum(b.unidadesPorCaja)  ?? null,
       cantidadTonos:    parseOptionalNum(b.cantidadTonos)    ?? null,
@@ -442,6 +443,7 @@ router.put("/:id", async (req, res) => {
       // ← #7 Sistema de 3 precios
       "precioEspecial",
       "precioMayorista",
+      "minimoMayorista",
       // ← #8 Venta por caja + tonos
       "unidadesPorCaja",
       "cantidadTonos",
@@ -465,7 +467,7 @@ router.put("/:id", async (req, res) => {
     for (const k of allow) {
       if (req.body[k] !== undefined) {
         // Parseo especial para los campos numéricos opcionales
-        if (["precioEspecial", "precioMayorista", "unidadesPorCaja", "cantidadTonos"].includes(k)) {
+        if (["precioEspecial", "precioMayorista", "unidadesPorCaja", "cantidadTonos","minimoMayorista"].includes(k)) {
           const parsed = parseOptionalNum(req.body[k]);
           patch[k] = parsed; // null si viene vacío
         } else {

@@ -176,6 +176,7 @@ router.post("/", async (req, res) => {
       subcategoria,
       stock,
       variants,
+      codigoInterno: b.codigoInterno ? String(b.codigoInterno).toUpperCase().trim() : "",
       sku:       b.sku || undefined,
       destacado: !!b.destacado,
       tags,
@@ -290,7 +291,12 @@ router.get("/search", async (req, res) => {
     const limitNum = Math.max(1, Math.min(200, toInt(limit, 24)));
     const skip = (pageNum - 1) * limitNum;
 
-    const filter = withVis(req, { $text: { $search: queryString } });
+    const filter = withVis(req, {
+  $or: [
+    { $text: { $search: queryString } },
+    { codigoInterno: queryString.toUpperCase() },
+  ]
+});
     const projection = { score: { $meta: "textScore" } };
 
     const [items, total] = await Promise.all([
@@ -464,6 +470,7 @@ router.put("/:id", async (req, res) => {
       "promo",
       "visible",
       "variants",
+      "codigoInterno",
       "sku",
     ];
 

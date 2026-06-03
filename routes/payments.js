@@ -1,4 +1,5 @@
 // routes/payments.js
+const { sendOrderConfirmation, sendPaymentConfirmed } = require('../lib/emailService');
 const express = require("express");
 const router = express.Router();
 const fs = require("fs");
@@ -482,7 +483,7 @@ router.post("/transfer", upload.single("comprobante"), async (req, res) => {
 
     await notifyOrderByWhatsApp(order);
     broadcastOrderUpdate(order);
-
+    sendOrderConfirmation(order).catch(e => console.warn('[email]', e.message));
     return res.json({
       ok: true,
       orderId: order._id,
@@ -653,20 +654,25 @@ router.post("/mp/create-preference", async (req, res) => {
     }
 
     await Order.findByIdAndUpdate(order._id, {
-      "mp.preferenceId": prefId,
-      "mp.status": "pending",
-    });
+  "mp.preferenceId": prefId,
+  "mp.status": "pending",
+});
 
-    return res.json({
-      ok: true,
-      orderId: order._id,
-      preferenceId: prefId,
-      init_point: initPoint,
-      ticket: order.shippingTicket,
-      orderNumber: order.orderNumber,
-      total: order.total,        // ✅ para validar rápido
-      computedTotal,             // ✅ debug
-    });
+// Email de pedido creado
+sendOrderConfirmation(order).catch(e =>
+  console.warn("[email]", e.message)
+);
+
+return res.json({
+  ok: true,
+  orderId: order._id,
+  preferenceId: prefId,
+  init_point: initPoint,
+  ticket: order.shippingTicket,
+  orderNumber: order.orderNumber,
+  total: order.total,
+  computedTotal,
+});
   } catch (e) {
     console.error("POST /mp/create-preference ERROR:", e?.response?.data || e);
     return res.status(500).json({ ok: false, message: "Error creando preferencia MP" });
@@ -720,6 +726,8 @@ const p = payment; // SDK nuevo devuelve el objeto directo
 
       await notifyBuyerConfirmed(o);
       await notifyAdminConfirmed(o);
+      sendPaymentConfirmed(o).catch(e => console.warn('[email]', e.message));
+      
     }
 
     await o.save();
@@ -830,6 +838,7 @@ router.post("/order/:id/confirm", async (req, res) => {
 
     await notifyBuyerConfirmed(o);
     await notifyAdminConfirmed(o);
+    sendPaymentConfirmed(o).catch(e => console.warn('[email]', e.message));
     broadcastOrderUpdate(o);
 
     const adminLink = makeWaLink(

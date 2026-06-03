@@ -150,7 +150,8 @@ app.use("/api/payments", paymentsRoutes);
 
 // Productos en tiempo real (SSE productos)
 app.use("/api", require("./routes/products.realtime"));
-
+const categoriesRouter = require('./routes/categories');
+app.use('/api/categories', categoriesRouter);
 /* ============ CRON ============ */
 try {
   const snapshotsEnabled = String(process.env.STATS_SNAPSHOTS_ENABLED || "true").toLowerCase() === "true";

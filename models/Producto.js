@@ -63,6 +63,7 @@ const ProductoSchema = new mongoose.Schema(
     tonosDisponibles:{ type: [String], default: [] }, // ej: ["Tono 1","Tono 2","Tono 3"]
     // ─────────────────────────────────────────────────────────────
 
+    codigoInterno: { type: String, trim: true, uppercase: true, default: "", index: true },
     sku:       { type: String, default: undefined },
     destacado: { type: Boolean, default: false },
     tags: { type: [String], default: ["nuevos-ingresos"] },

@@ -372,7 +372,7 @@ router.get("/", async (req, res) => {
     if (q && String(q).trim() !== "") {
       const esc = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const regex = new RegExp(esc(String(q).trim()), "i");
-      and.push({ $or: [{ nombre: regex }, { descripcion: regex }, { categoria: regex }, { subcategoria: regex }, { tags: regex }] });
+      and.push({ $or: [{ nombre: regex }, { descripcion: regex }, { categoria: regex }, { subcategoria: regex }, { tags: regex }, { codigoInterno: String(q).trim().toUpperCase() }] });
     }
 
     if (and.length) filtro.$and = and;

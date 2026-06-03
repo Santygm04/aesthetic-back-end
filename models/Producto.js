@@ -47,6 +47,7 @@ const ProductoSchema = new mongoose.Schema(
     // ─────────────────────────────────────────────────────────────
 
     imagen:      { type: String, default: "" },
+imagenes:    { type: [String], default: [] },
     descripcion: { type: String, default: "" },
     categoria:   { type: String, index: true, default: "" },
     subcategoria:{ type: String, index: true, default: "" },

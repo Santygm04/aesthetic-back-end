@@ -170,7 +170,8 @@ router.post("/", async (req, res) => {
       tonosDisponibles: Array.isArray(b.tonosDisponibles) ? b.tonosDisponibles : [],
       // ──────────────────────────────────────────────────────────
       precioOriginal,
-      imagen:      b.imagen || "",
+      imagen:      Array.isArray(b.imagenes) && b.imagenes.length ? b.imagenes[0] : (b.imagen || ""),
+imagenes:    Array.isArray(b.imagenes) ? b.imagenes : (b.imagen ? [b.imagen] : []),
       descripcion: String(b.descripcion || "").trim(),
       categoria,
       subcategoria,
@@ -461,6 +462,7 @@ router.put("/:id", async (req, res) => {
   "tonosDisponibles",
       // ── resto ──
       "imagen",
+"imagenes",
       "descripcion",
       "categoria",
       "subcategoria",

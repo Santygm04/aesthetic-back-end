@@ -43,6 +43,8 @@ const ProductoSchema = new mongoose.Schema(
     // segundo tier mayorista, ej: 12 unidades
     precioMayorista2: { type: Number, min: 0, default: null },
     // precio para el segundo tier mayorista
+    minimoMayorista3: { type: Number, min: 1, default: null },
+    precioMayorista3: { type: Number, min: 0, default: null },
     precioOriginal:  { type: Number, min: 0, default: undefined },
     // ─────────────────────────────────────────────────────────────
 

@@ -33,7 +33,7 @@ const ProductoSchema = new mongoose.Schema(
     // precioEspecial= Precio Especial  (comprando 5+ productos distintos)
     // precioMayorista= Precio Mayorista (compra mínima $30.000 en subtotal)
     // precioOriginal = precio "tachado" de referencia (opcional)
-    precio:          { type: Number, required: true, min: 0 },
+    precio:          { type: Number, required: false, min: 0, default: 0 },
     precioEspecial:  { type: Number, min: 0, default: null }, // null = no aplica
     precioMayorista: { type: Number, min: 0, default: null }, // null = no aplica
     minimoMayorista:  { type: Number, min: 1, default: null },

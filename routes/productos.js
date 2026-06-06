@@ -96,9 +96,7 @@ router.post("/", async (req, res) => {
   try {
     const b = req.body || {};
 
-    const precio = parsePrecio(b.precio);
-    if (precio === null)
-      return res.status(400).json({ message: "Precio base inválido" });
+    const precio = b.precio === "" || b.precio === undefined ? 0 : (parsePrecio(b.precio) ?? 0);
 
     const precioOriginal =
       b.precioOriginal === undefined || b.precioOriginal === ""
@@ -437,9 +435,7 @@ router.put("/:id", async (req, res) => {
     if (req.body.subcategoria) req.body.subcategoria = String(req.body.subcategoria).toLowerCase();
     if (req.body.promo?.precio !== undefined) req.body.promo.precio = parsePrecio(req.body.promo.precio);
     if (req.body.precio !== undefined) {
-      const pbase = parsePrecio(req.body.precio);
-      if (pbase === null) return res.status(400).json({ message: "Precio base inválido" });
-      req.body.precio = pbase;
+      req.body.precio = req.body.precio === "" ? 0 : (parsePrecio(req.body.precio) ?? 0);
     }
     if (req.body.precioOriginal !== undefined) req.body.precioOriginal = parsePrecio(req.body.precioOriginal);
 

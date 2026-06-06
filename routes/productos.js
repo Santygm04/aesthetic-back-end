@@ -489,6 +489,13 @@ router.put("/:id", async (req, res) => {
       }
     }
 
+    // Sincronizar imagen singular con el primer elemento de imagenes
+    if (patch.imagenes !== undefined) {
+      patch.imagen = Array.isArray(patch.imagenes) && patch.imagenes.length
+        ? patch.imagenes[0]
+        : "";
+    }
+
     const updated = await Producto.findByIdAndUpdate(id, patch, { new: true, runValidators: true });
     res.json(updated);
   } catch (e) {

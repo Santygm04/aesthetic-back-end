@@ -10,7 +10,10 @@ const toInt = (v, def) => {
 
 const parsePrecio = (val) => {
   if (val === null || val === undefined || val === "") return null;
-  const s = String(val).trim().replace(/\./g, "").replace(",", ".");
+  const str = String(val).trim();
+  // Si tiene coma como decimal (ej: "2345,50") → reemplazar coma por punto
+  // Si ya tiene punto decimal (ej: "2345.50") → no tocar
+  const s = str.includes(",") ? str.replace(/\./g, "").replace(",", ".") : str;
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 };

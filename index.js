@@ -99,10 +99,36 @@ app.use(express.json({
   strict: true
 }));
 
-const mongoSanitize = require("express-mongo-sanitize");
+// MIDDLEWARE DE SANITIZACIÓN MANUAL (reemplaza a express-mongo-sanitize)
+const sanitizeObject = (obj) => {
+  if (!obj) return obj;
+  if (typeof obj === 'string') {
+    // Eliminar caracteres peligrosos de MongoDB ($ y .)
+    return obj.replace(/[$]/g, '').replace(/[.]/g, '');
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeObject(item));
+  }
+  if (typeof obj === 'object') {
+    const sanitized = {};
+    for (let [key, value] of Object.entries(obj)) {
+      // Sanitizar también las keys (por si acaso)
+      const safeKey = key.replace(/[$]/g, '').replace(/[.]/g, '');
+      sanitized[safeKey] = sanitizeObject(value);
+    }
+    return sanitized;
+  }
+  return obj;
+};
 
-// SOLO sanitizar body, NO query ni params
-app.use(mongoSanitize());
+// Aplicar sanitización SOLO al body (como querías originalmente)
+app.use((req, res, next) => {
+  if (req.body) {
+    req.body = sanitizeObject(req.body);
+  }
+  next();
+});
+
 app.use((req, res, next) => next());
 
 // Rate limiting global para endpoints de admin

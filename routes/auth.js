@@ -146,19 +146,23 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ message: "Usuario o contraseña inválidos" });
     }
 
+    if (!process.env.JWT_SECRET) {
+      return res.status(500).json({ message: "JWT no configurado en servidor" });
+    }
+
     const token = jwt.sign(
       {
         sub: String(u._id),
         username: u.username,
         role: u.role,
       },
-      JWT_SECRET,
-      { expiresIn: JWT_EXPIRES }
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES || "7d" }
     );
 
     return res.json({ ok: true, token });
   } catch (e) {
-    console.error("LOGIN RAILWAY ERROR:", e);
+    console.error("LOGIN CRASH:", e);
     return res.status(500).json({ message: "Error interno login" });
   }
 });

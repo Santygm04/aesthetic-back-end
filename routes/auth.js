@@ -340,4 +340,79 @@ router.post("/change-password", async (req, res) => {
   }
 });
 
+/* =========================================================
+ *  D) Crear/listar usuarios (solo admin con JWT)
+ * ========================================================= */
+router.get("/users", authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") return res.status(403).json({ message: "No autorizado" });
+    const users = await User.find({}, "-passwordHash").sort({ createdAt: -1 });
+    return res.json({ ok: true, users });
+  } catch (e) {
+    return res.status(500).json({ message: "Error al listar usuarios" });
+  }
+});
+
+router.post("/users", authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") return res.status(403).json({ message: "No autorizado" });
+    const { username, password, name, role, permissions } = req.body || {};
+    if (!username || !password) return res.status(400).json({ message: "Faltan datos" });
+    if (password.length < 8) return res.status(400).json({ message: "Contraseña mínimo 8 caracteres" });
+    const exists = await User.findOne({ username: username.toLowerCase().trim() });
+    if (exists) return res.status(409).json({ message: "El usuario ya existe" });
+    const hash = await bcrypt.hash(password, 10);
+    const u = await User.create({
+      username: username.toLowerCase().trim(),
+      name: name || "",
+      role: role || "vendedor",
+      passwordHash: hash,
+      active: true,
+      permissions: permissions || {
+        verEstadisticas: false,
+        verOrdenes: true,
+        editarCategorias: false,
+        crearProductos: true,
+        editarStockSolo: true,
+      },
+    });
+    return res.json({ ok: true, user: { id: u._id, username: u.username, name: u.name, role: u.role, permissions: u.permissions } });
+  } catch (e) {
+    console.error("POST /auth/users error:", e);
+    return res.status(500).json({ message: "Error al crear usuario" });
+  }
+});
+
+router.patch("/users/:id", authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") return res.status(403).json({ message: "No autorizado" });
+    const { name, role, permissions, active, password } = req.body || {};
+    const u = await User.findById(req.params.id);
+    if (!u) return res.status(404).json({ message: "No encontrado" });
+    if (name !== undefined) u.name = name;
+    if (role !== undefined) u.role = role;
+    if (active !== undefined) u.active = active;
+    if (permissions !== undefined) u.permissions = { ...u.permissions, ...permissions };
+    if (password) {
+      if (password.length < 8) return res.status(400).json({ message: "Contraseña mínimo 8 caracteres" });
+      u.passwordHash = await bcrypt.hash(password, 10);
+    }
+    await u.save();
+    return res.json({ ok: true, user: { id: u._id, username: u.username, name: u.name, role: u.role, permissions: u.permissions, active: u.active } });
+  } catch (e) {
+    return res.status(500).json({ message: "Error al actualizar usuario" });
+  }
+});
+
+router.delete("/users/:id", authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") return res.status(403).json({ message: "No autorizado" });
+    if (String(req.user.sub) === String(req.params.id)) return res.status(400).json({ message: "No podés eliminarte a vos mismo" });
+    await User.findByIdAndDelete(req.params.id);
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ message: "Error al eliminar usuario" });
+  }
+});
+
 module.exports = { router, authMiddleware };

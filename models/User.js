@@ -5,9 +5,16 @@ const UserSchema = new mongoose.Schema(
   {
     username: { type: String, unique: true, required: true, lowercase: true, trim: true },
     name: { type: String, default: "" },
-    role: { type: String, enum: ["admin", "staff"], default: "admin" },
-    passwordHash: { type: String, required: true },
-    active: { type: Boolean, default: true },
+    role: { type: String, enum: ["admin", "vendedor"], default: "admin" },
+passwordHash: { type: String, required: true },
+active: { type: Boolean, default: true },
+permissions: {
+  verEstadisticas:   { type: Boolean, default: true },
+  verOrdenes:        { type: Boolean, default: true },
+  editarCategorias:  { type: Boolean, default: true },
+  crearProductos:    { type: Boolean, default: true },
+  editarStockSolo:   { type: Boolean, default: false },
+},
   },
   { timestamps: true }
 );

@@ -100,10 +100,18 @@ app.use(express.json({
   strict: true
 }));
 
-app.use((req, res, next) => {
-  if (req.body) req.body = JSON.parse(JSON.stringify(req.body));
-  next();
-});
+const mongoSanitize = require("express-mongo-sanitize");
+
+// SOLO sanitizar body, NO query ni params
+app.use(
+  mongoSanitize({
+    replaceWith: "_",
+    allowDots: true,
+    onSanitize: ({ req, key }) => {
+      console.warn("[mongo-sanitize] bloqueado:", key);
+    },
+  })
+);
 app.use(xss());
 
 // Rate limiting global para endpoints de admin

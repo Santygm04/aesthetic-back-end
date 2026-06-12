@@ -100,7 +100,10 @@ app.use(express.json({
   strict: true
 }));
 
-app.use(mongoSanitize());
+app.use((req, res, next) => {
+  if (req.body) req.body = JSON.parse(JSON.stringify(req.body));
+  next();
+});
 app.use(xss());
 
 // Rate limiting global para endpoints de admin

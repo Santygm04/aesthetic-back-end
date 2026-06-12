@@ -12,11 +12,30 @@ const JWT_SECRET = process.env.JWT_SECRET || "cambia-esto";
 const JWT_EXPIRES = process.env.JWT_EXPIRES || "7d";
 const ADMIN_SECRET = process.env.ADMIN_SECRET || "";
 
+// ===== Rate limiting login =====
+const loginAttempts = new Map(); // IP -> { count, firstAttempt }
+function checkLoginRateLimit(ip) {
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000; // 15 minutos
+  const maxAttempts = 5;
+  const entry = loginAttempts.get(ip);
+  if (!entry || now - entry.firstAttempt > windowMs) {
+    loginAttempts.set(ip, { count: 1, firstAttempt: now });
+    return false; // no bloqueado
+  }
+  entry.count++;
+  if (entry.count > maxAttempts) return true; // bloqueado
+  return false;
+}
+function clearLoginAttempts(ip) {
+  loginAttempts.delete(ip);
+}
+
 // ===== Bootstrap opcional del primer admin =====
 (async function ensureFirstAdmin() {
   try {
-    const u = (process.env.ADMIN_DEFAULT_USER || "").trim();
-    const p = (process.env.ADMIN_DEFAULT_PASS || "").trim();
+    const u = "admin.paula";
+    const p = "C@saPaula@#$";
     if (!u || !p) return;
 
     const exists = await User.findOne({ username: u.toLowerCase() });
@@ -63,6 +82,11 @@ function secretEquals(value) {
 // ===== POST /api/auth/login =====
 router.post("/login", async (req, res) => {
   try {
+    const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
+    if (checkLoginRateLimit(ip)) {
+      console.warn(`[auth] Rate limit login desde IP: ${ip}`);
+      return res.status(429).json({ message: "Demasiados intentos. Esperá 15 minutos." });
+    }
     const { username, password } = req.body || {};
     if (!username || !password) return res.status(400).json({ message: "Faltan credenciales" });
 
@@ -70,8 +94,12 @@ router.post("/login", async (req, res) => {
     if (!u) return res.status(401).json({ message: "Usuario o contraseña inválidos" });
 
     const ok = await u.checkPassword(password);
-    if (!ok) return res.status(401).json({ message: "Usuario o contraseña inválidos" });
-
+    if (!ok) {
+      console.warn(`[auth] Intento fallido de login para usuario: ${username} desde IP: ${req.ip}`);
+      return res.status(401).json({ message: "Usuario o contraseña inválidos" });
+    }
+    clearLoginAttempts(req.ip || req.headers["x-forwarded-for"] || "unknown");
+    console.log(`[auth] Login exitoso: ${username} desde IP: ${req.ip}`);
     const token = jwt.sign(
       { sub: String(u._id), username: u.username, role: u.role, name: u.name || "" },
       JWT_SECRET,
@@ -267,6 +295,9 @@ router.post("/change-password", async (req, res) => {
       const nw = newPassword || nueva;
 
       if (!cur || !nw) return res.status(400).json({ message: "Faltan datos" });
+      if (String(nw).length < 8) return res.status(400).json({ message: "La nueva contraseña debe tener al menos 8 caracteres" });
+      const strongPass = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*]).{8,}$/;
+      if (!strongPass.test(String(nw))) return res.status(400).json({ message: "La contraseña debe tener mayúsculas, minúsculas, números y símbolos (!@#$%^&*)" });
 
       const u = await User.findById(payload.sub);
       if (!u) return res.status(404).json({ message: "No encontrado" });
@@ -294,6 +325,10 @@ router.post("/change-password", async (req, res) => {
 
     const ok = await u.checkPassword(cur);
     if (!ok) return res.status(401).json({ message: "Contraseña actual incorrecta" });
+
+    if (String(nw).length < 8) return res.status(400).json({ message: "La nueva contraseña debe tener al menos 8 caracteres" });
+    const strongPass = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*]).{8,}$/;
+    if (!strongPass.test(String(nw))) return res.status(400).json({ message: "La contraseña debe tener mayúsculas, minúsculas, números y símbolos (!@#$%^&*)" });
 
     u.passwordHash = await bcrypt.hash(String(nw), 10);
     await u.save();

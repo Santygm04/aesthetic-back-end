@@ -5,10 +5,9 @@ dns.setServers(['1.1.1.1', '8.8.8.8']);
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
-if (process.env.NODE_ENV !== 'production') {
-  require('dotenv').config();
-}
+require('dotenv').config();
 
+const rateLimit = require("express-rate-limit");
 const productosRoutes = require("./routes/productos");
 const paymentsRoutes = require("./routes/payments");
 const shippingRoutes = require("./routes/shipping");
@@ -71,6 +70,28 @@ app.options(/.*/, cors(corsOptions));
 
 // ✅ 3) JSON después de CORS
 app.use(express.json({ limit: "10mb" }));
+
+// Rate limiting global para endpoints de admin
+const adminLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, message: "Demasiadas solicitudes, esperá unos minutos" },
+  keyGenerator: (req) => req.ip || req.headers["x-forwarded-for"] || "unknown",
+});
+const strictLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, message: "Demasiadas solicitudes, esperá unos minutos" },
+  keyGenerator: (req) => req.ip || req.headers["x-forwarded-for"] || "unknown",
+});
+app.use("/api/auth", strictLimiter);
+app.use("/api/productos", adminLimiter);
+app.use("/api/payments", adminLimiter);
+app.use("/api/categories", adminLimiter);
 
 app.use("/uploads", express.static("uploads"));
 

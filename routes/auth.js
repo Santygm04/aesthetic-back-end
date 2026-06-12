@@ -126,30 +126,39 @@ function secretEquals(value) {
 router.post("/login", async (req, res) => {
   try {
     const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
+
     if (checkLoginRateLimit(ip)) {
-      console.warn(`[auth] Rate limit login desde IP: ${ip}`);
-      return res.status(429).json({ message: "Demasiados intentos. Esperá 15 minutos." });
+      return res.status(429).json({ message: "Demasiados intentos" });
     }
+
     const { username, password } = req.body || {};
-    if (!username || !password) return res.status(400).json({ message: "Faltan credenciales" });
 
-    const u = await User.findOne({ username: String(username).toLowerCase() });
+    if (!username || !password) {
+      return res.status(400).json({ message: "Faltan credenciales" });
+    }
+
+    const u = await User.findOne({
+      username: username.toLowerCase().trim(),
+      active: true,
+    });
+
     if (!u) {
-  return res.status(401).json({
-    message: "Usuario o contraseña inválidos",
-  });
-}
-    if (!u) return res.status(401).json({ message: "Usuario o contraseña inválidos" });
-
-    const ok = await bcrypt.compare(password, u.passwordHash);
-    if (!ok) {
-      console.warn(`[auth] Intento fallido de login para usuario: ${username} desde IP: ${req.ip}`);
       return res.status(401).json({ message: "Usuario o contraseña inválidos" });
     }
-    clearLoginAttempts(req.ip || req.headers["x-forwarded-for"] || "unknown");
-    console.log(`[auth] Login exitoso: ${username} desde IP: ${req.ip}`);
+
+    const ok = await u.checkPassword(password);
+
+    if (!ok) {
+      return res.status(401).json({ message: "Usuario o contraseña inválidos" });
+    }
+
     const token = jwt.sign(
-      { sub: String(u._id), username: u.username, role: u.role, name: u.name || "" },
+      {
+        sub: String(u._id),
+        username: u.username,
+        role: u.role,
+        name: u.name || "",
+      },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES }
     );
@@ -157,11 +166,16 @@ router.post("/login", async (req, res) => {
     return res.json({
       ok: true,
       token,
-      user: { id: u._id, username: u.username, name: u.name, role: u.role },
+      user: {
+        id: u._id,
+        username: u.username,
+        name: u.name,
+        role: u.role,
+      },
     });
   } catch (e) {
-    console.error("POST /auth/login error:", e);
-    return res.status(500).json({ message: "Error al iniciar sesión" });
+    console.error("LOGIN ERROR:", e);
+    return res.status(500).json({ message: "Error interno en login" });
   }
 });
 

@@ -2,6 +2,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const router = express.Router();
 const Producto = require("../models/Producto");
+const { authMiddleware, adminOnly } = require("./auth");
 
 const toInt = (v, def) => {
   const n = parseInt(v, 10);
@@ -95,7 +96,7 @@ const parseOptionalNum = (val) => {
 // -------------------------
 // CREAR PRODUCTO
 // -------------------------
-router.post("/", async (req, res) => {
+router.post("/", authMiddleware, adminOnly, async (req, res) => {
   try {
     const b = req.body || {};
 
@@ -429,11 +430,26 @@ router.get("/", async (req, res) => {
 });
 
 /* ========================== UPDATE ========================== */
-router.put("/:id", async (req, res) => {
+router.put("/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const doc = await Producto.findById(id);
     if (!doc) return res.status(404).json({ message: "No encontrado" });
+
+    // Vendedor solo puede tocar precios
+    const isVendedor = req.user?.role === "vendedor";
+    if (isVendedor) {
+      const soloPrecios = [
+        "precio", "precioEspecial", "precioMayorista", "minimoMayorista",
+        "precioMayorista2", "minimoMayorista2", "precioMayorista3", "minimoMayorista3",
+      ];
+      const camposEnviados = Object.keys(req.body);
+      const camposNoPermitidos = camposEnviados.filter(k => !soloPrecios.includes(k));
+      if (camposNoPermitidos.length > 0) {
+        console.warn(`[auth] Vendedor ${req.user.username} intentó modificar: ${camposNoPermitidos.join(", ")}`);
+        return res.status(403).json({ message: "Solo podés modificar precios" });
+      }
+    }
 
     // Validaciones básicas de actualización
 
@@ -582,7 +598,7 @@ if (
 });
 
 /* ========================== PATCH VISIBLE ========================== */
-router.patch("/:id/visible", async (req, res) => {
+router.patch("/:id/visible", authMiddleware, adminOnly, async (req, res) => {
   try {
     const { id } = req.params;
     const visible = parseBool(req.body.visible);
@@ -613,7 +629,7 @@ router.get("/:id", async (req, res) => {
 });
 
 /* ========================== DELETE ========================== */
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", authMiddleware, adminOnly, async (req, res) => {
   const { id } = req.params;
   try {
     console.log("[DELETE producto] id =", id);

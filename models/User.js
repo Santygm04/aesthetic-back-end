@@ -24,4 +24,12 @@ UserSchema.methods.checkPassword = function (plain) {
   return bcrypt.compare(plain, this.passwordHash);
 };
 
+// Nunca devolver passwordHash en JSON por defecto
+UserSchema.set("toJSON", {
+  transform: (_, ret) => {
+    delete ret.passwordHash;
+    return ret;
+  },
+});
+
 module.exports = mongoose.model("User", UserSchema);

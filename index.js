@@ -129,7 +129,17 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use((req, res, next) => next());
+// Log de requests a rutas sensibles (sin datos sensibles)
+app.use((req, res, next) => {
+  const method = req.method.toUpperCase();
+  const sensible = ["/api/auth", "/api/productos", "/api/payments", "/api/categories"];
+  const esSensible = sensible.some(p => req.path.startsWith(p));
+  if (esSensible && method !== "GET") {
+    const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
+    console.info(`[request] ${method} ${req.path} — IP: ${ip}`);
+  }
+  next();
+});
 
 // Rate limiting global para endpoints de admin
 const adminLimiter = rateLimit({

@@ -25,7 +25,7 @@ const loginAttempts = new Map(); // IP -> { count, firstAttempt }
 function checkLoginRateLimit(ip) {
   const now = Date.now();
   const windowMs = 15 * 60 * 1000; // 15 minutos
-  const maxAttempts = 5;
+  const maxAttempts = 30;
   const entry = loginAttempts.get(ip);
   if (!entry || now - entry.firstAttempt > windowMs) {
     loginAttempts.set(ip, { count: 1, firstAttempt: now });
@@ -125,44 +125,47 @@ function secretEquals(value) {
 // ===== POST /api/auth/login =====
 router.post("/login", async (req, res) => {
   try {
+    const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
     const { username, password } = req.body || {};
 
     if (!username || !password) {
       return res.status(400).json({ message: "Faltan credenciales" });
     }
 
-    const u = await User.findOne({
-      username: username.toLowerCase().trim(),
-      active: true,
-    });
+    // Sanitizar input
+    const uname = String(username).toLowerCase().trim().slice(0, 64);
+    const pass  = String(password).slice(0, 128);
 
-    if (!u || !u.passwordHash) {
+    if (checkLoginRateLimit(ip)) {
+      console.warn(`[auth] Login bloqueado IP: ${ip} usuario: ${uname}`);
+      return res.status(429).json({ message: "Demasiados intentos. Esperá 15 minutos." });
+    }
+
+    const u = await User.findOne({ username: uname, active: true });
+
+    // Tiempo constante: comparar igual aunque no exista el usuario
+    const dummyHash = "$2a$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
+    const ok = u
+      ? await bcrypt.compare(pass, u.passwordHash)
+      : await bcrypt.compare(pass, dummyHash);
+
+    if (!u || !u.passwordHash || !ok) {
+      console.warn(`[auth] Login fallido IP: ${ip} usuario: ${uname}`);
       return res.status(401).json({ message: "Usuario o contraseña inválidos" });
     }
 
-    const ok = await bcrypt.compare(password, u.passwordHash);
-
-    if (!ok) {
-      return res.status(401).json({ message: "Usuario o contraseña inválidos" });
-    }
-
-    if (!process.env.JWT_SECRET) {
-      return res.status(500).json({ message: "JWT no configurado en servidor" });
-    }
+    clearLoginAttempts(ip);
+    console.info(`[auth] Login exitoso usuario: ${uname}`);
 
     const token = jwt.sign(
-      {
-        sub: String(u._id),
-        username: u.username,
-        role: u.role,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES || "7d" }
+      { sub: String(u._id), username: u.username, role: u.role },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES }
     );
 
     return res.json({ ok: true, token });
   } catch (e) {
-    console.error("LOGIN CRASH:", e);
+    console.error("[auth] LOGIN ERROR:", e.message);
     return res.status(500).json({ message: "Error interno login" });
   }
 });
@@ -539,31 +542,7 @@ router.post("/request-permission", authMiddleware, async (req, res) => {
   }
 });
 
-router.post("/force-set-password", async (req, res) => {
-  try {
-    const { username, password, admin_key } = req.body;
-    
-    // Verificación manual
-    if (admin_key !== 'ADMIN_FORCE_KEY_2024') {
-      return res.status(401).json({ message: "No autorizado" });
-    }
-    
-    const bcrypt = require('bcryptjs');
-    const User = require('../models/User');
-    
-    const hash = await bcrypt.hash(password, 10);
-    
-    const user = await User.findOneAndUpdate(
-      { username: username },
-      { passwordHash: hash, active: true },
-      { new: true }
-    );
-    
-    res.json({ ok: true, message: "Contraseña actualizada", user: user.username });
-  } catch (e) {
-    res.status(500).json({ message: e.message });
-  }
-});
+
 
 module.exports = {
   router,

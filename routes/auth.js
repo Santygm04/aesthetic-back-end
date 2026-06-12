@@ -125,12 +125,6 @@ function secretEquals(value) {
 // ===== POST /api/auth/login =====
 router.post("/login", async (req, res) => {
   try {
-    const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
-
-    if (checkLoginRateLimit(ip)) {
-      return res.status(429).json({ message: "Demasiados intentos" });
-    }
-
     const { username, password } = req.body || {};
 
     if (!username || !password) {
@@ -142,11 +136,11 @@ router.post("/login", async (req, res) => {
       active: true,
     });
 
-    if (!u) {
+    if (!u || !u.passwordHash) {
       return res.status(401).json({ message: "Usuario o contraseña inválidos" });
     }
 
-    const ok = await u.checkPassword(password);
+    const ok = await bcrypt.compare(password, u.passwordHash);
 
     if (!ok) {
       return res.status(401).json({ message: "Usuario o contraseña inválidos" });
@@ -157,25 +151,15 @@ router.post("/login", async (req, res) => {
         sub: String(u._id),
         username: u.username,
         role: u.role,
-        name: u.name || "",
       },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES }
     );
 
-    return res.json({
-      ok: true,
-      token,
-      user: {
-        id: u._id,
-        username: u.username,
-        name: u.name,
-        role: u.role,
-      },
-    });
+    return res.json({ ok: true, token });
   } catch (e) {
-    console.error("LOGIN ERROR:", e);
-    return res.status(500).json({ message: "Error interno en login" });
+    console.error("LOGIN RAILWAY ERROR:", e);
+    return res.status(500).json({ message: "Error interno login" });
   }
 });
 

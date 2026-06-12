@@ -415,4 +415,69 @@ router.delete("/users/:id", authMiddleware, async (req, res) => {
   }
 });
 
+/* =========================================================
+ *  E) Solicitar permiso (vendedor → email al admin)
+ *     POST /api/auth/request-permission
+ *     Body: { permiso }  — requiere JWT
+ * ========================================================= */
+const nodemailer = require("nodemailer");
+
+const PERM_LABELS = {
+  editarCategorias: "Editar categorías",
+  crearProductos:   "Crear productos",
+  verEstadisticas:  "Ver estadísticas",
+  verOrdenes:       "Ver órdenes",
+  editarStockSolo:  "Editar stock",
+};
+
+router.post("/request-permission", authMiddleware, async (req, res) => {
+  try {
+    const { permiso } = req.body || {};
+    if (!permiso || !PERM_LABELS[permiso])
+      return res.status(400).json({ message: "Permiso inválido" });
+
+    const solicitante = await User.findById(req.user.sub);
+    if (!solicitante) return res.status(404).json({ message: "Usuario no encontrado" });
+
+    // Buscar admin para obtener su email (si tienen email guardado) o usar ADMIN_EMAIL del .env
+    const adminEmail = process.env.ADMIN_EMAIL;
+    if (!adminEmail) return res.status(500).json({ message: "No hay email de admin configurado (ADMIN_EMAIL en .env)" });
+
+    const frontUrl = process.env.FRONT_URL || "http://localhost:5173";
+    const permLabel = PERM_LABELS[permiso];
+
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_PASS,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"Aesthetic Panel" <${process.env.GMAIL_USER}>`,
+      to: adminEmail,
+      subject: `🔐 Solicitud de permiso: ${permLabel}`,
+      html: `
+        <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#fff;border-radius:12px;border:1px solid #f3c9e2">
+          <h2 style="color:#db2777;margin:0 0 12px">Solicitud de permiso</h2>
+          <p><strong>${solicitante.name || solicitante.username}</strong> (@${solicitante.username}) solicita acceso a:</p>
+          <div style="background:#fce7f3;border-radius:8px;padding:12px 16px;margin:12px 0;font-weight:700;color:#9d174d;font-size:1.1rem">
+            🔓 ${permLabel}
+          </div>
+          <p style="color:#6b7280;font-size:.9rem">Para aprobar o rechazar, ingresá al panel y editá los permisos del usuario.</p>
+          <a href="${frontUrl}/dashboard?tab=usuarios" style="display:inline-block;margin-top:16px;padding:12px 24px;background:linear-gradient(135deg,#db2777,#be185d);color:#fff;border-radius:8px;text-decoration:none;font-weight:700">
+            Ir al panel → Usuarios
+          </a>
+        </div>
+      `,
+    });
+
+    return res.json({ ok: true, message: "Solicitud enviada" });
+  } catch (e) {
+    console.error("POST /auth/request-permission error:", e);
+    return res.status(500).json({ message: "No se pudo enviar la solicitud" });
+  }
+});
+
 module.exports = { router, authMiddleware };

@@ -10,6 +10,7 @@ require('dotenv').config();
 const helmet = require("helmet");
 const mongoSanitize = require("express-mongo-sanitize");
 const rateLimit = require("express-rate-limit");
+const { ipKeyGenerator } = require("express-rate-limit");
 const productosRoutes = require("./routes/productos");
 const paymentsRoutes = require("./routes/payments");
 const shippingRoutes = require("./routes/shipping");
@@ -17,6 +18,7 @@ const Producto = require("./models/Producto");
 const StatsDaily = require("./models/StatsDaily"); // para syncIndexes
 const { router: authRouter } = require("./routes/auth"); // 👈 Auth JWT
 const xss = require("xss-clean");
+
 
 mongoose.set("autoIndex", true);
 
@@ -29,7 +31,7 @@ app.use(
   })
 );
 app.disable("x-powered-by");
-app.use(helmet());
+
 const PORT = process.env.PORT || 3000;
 
 // 💡 Recomendado en producción detrás de proxy (Railway/Render/Nginx)
@@ -53,7 +55,7 @@ const isLocalhost = (origin) =>
 // ✅ IMPORTANTE: CORS options
 const corsOptions = {
   origin: (origin, cb) => {
-    if (!origin) return cb(new Error("CORS no permitido"), false); // server-to-server/Postman/curl
+    if (!origin) return cb(null, true); // server-to-server/Postman/curl
     console.log("[CORS] Origin recibido:", origin);
 
     if (explicitlyAllowed.size > 0) {
@@ -97,8 +99,7 @@ app.use(express.json({
   limit: "20mb",
   strict: true
 }));
-app.use(mongoSanitize());
-app.use(xss());
+
 app.use(mongoSanitize());
 app.use(xss());
 
@@ -109,7 +110,7 @@ const adminLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { ok: false, message: "Demasiadas solicitudes, esperá unos minutos" },
-  keyGenerator: (req) => req.ip || req.headers["x-forwarded-for"] || "unknown",
+  keyGenerator: ipKeyGenerator(),
 });
 const strictLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -117,7 +118,7 @@ const strictLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { ok: false, message: "Demasiadas solicitudes, esperá unos minutos" },
-  keyGenerator: (req) => req.ip || req.headers["x-forwarded-for"] || "unknown",
+  keyGenerator: ipKeyGenerator(),
 });
 app.use("/api/auth", strictLimiter);
 

@@ -34,8 +34,8 @@ function clearLoginAttempts(ip) {
 // ===== Bootstrap opcional del primer admin =====
 (async function ensureFirstAdmin() {
   try {
-    const u = "admin.paula";
-    const p = "C@saPaula@#$";
+    const u = process.env.ADMIN_DEFAULT_USER;
+    const p = process.env.ADMIN_DEFAULT_PASS;
     if (!u || !p) return;
 
     const exists = await User.findOne({ username: u.toLowerCase() });

@@ -2,11 +2,28 @@ const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
 
+const jwt = require("jsonwebtoken");
+const User = require("../models/User");
 const ADMIN_SECRET = (process.env.ADMIN_SECRET || "").trim();
-const isAdmin = (req) => {
+const JWT_SECRET   = process.env.JWT_SECRET || "cambia-esto";
+
+function isAdmin(req) {
   const s = (req.headers["x-admin-secret"] || req.body?.secret || "").trim();
   return ADMIN_SECRET && s === ADMIN_SECRET;
-};
+}
+
+async function canWriteCategories(req) {
+  if (isAdmin(req)) return true;
+  const hdr = req.headers.authorization || "";
+  if (!hdr.startsWith("Bearer ")) return false;
+  try {
+    const payload = jwt.verify(hdr.slice(7), JWT_SECRET);
+    if (payload.role === "admin") return true;
+    // vendedor con permiso editarCategorias
+    const u = await User.findById(payload.sub);
+    return u?.permissions?.editarCategorias === true;
+  } catch { return false; }
+}
 
 const CategorySchema = new mongoose.Schema({
   nombre: { type: String, required: true, trim: true },
@@ -29,7 +46,7 @@ router.get("/", async (req, res) => {
 
 // POST /api/categories — admin
 router.post("/", async (req, res) => {
-  if (!isAdmin(req)) return res.status(401).json({ message: "No autorizado" });
+  if (!await canWriteCategories(req)) return res.status(401).json({ message: "No autorizado" });
   try {
     const { nombre, slug, subcategorias = [], orden = 0 } = req.body;
     if (!nombre || !slug) return res.status(400).json({ message: "nombre y slug son requeridos" });
@@ -43,7 +60,7 @@ router.post("/", async (req, res) => {
 
 // PUT /api/categories/:id — admin
 router.put("/:id", async (req, res) => {
-  if (!isAdmin(req)) return res.status(401).json({ message: "No autorizado" });
+ if (!await canWriteCategories(req)) return res.status(401).json({ message: "No autorizado" });
   try {
     const { nombre, slug, subcategorias, orden } = req.body;
     const cat = await Category.findByIdAndUpdate(
@@ -60,7 +77,7 @@ router.put("/:id", async (req, res) => {
 
 // DELETE /api/categories/:id — admin
 router.delete("/:id", async (req, res) => {
-  if (!isAdmin(req)) return res.status(401).json({ message: "No autorizado" });
+  if (!await canWriteCategories(req)) return res.status(401).json({ message: "No autorizado" });
   try {
     await Category.findByIdAndDelete(req.params.id);
     return res.json({ ok: true });

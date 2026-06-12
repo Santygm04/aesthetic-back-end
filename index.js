@@ -102,12 +102,7 @@ app.use(express.json({
 const mongoSanitize = require("express-mongo-sanitize");
 
 // SOLO sanitizar body, NO query ni params
-app.use(
-  mongoSanitize({
-    replaceWith: "_",
-    allowDots: true,
-  })
-);
+app.use(mongoSanitize());
 app.use((req, res, next) => next());
 
 // Rate limiting global para endpoints de admin

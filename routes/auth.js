@@ -120,6 +120,8 @@ function secretEquals(value) {
   return Boolean(ADMIN_SECRET) && String(value || "").trim() === ADMIN_SECRET;
 }
 
+
+
 // ===== POST /api/auth/login =====
 router.post("/login", async (req, res) => {
   try {
@@ -131,10 +133,15 @@ router.post("/login", async (req, res) => {
     const { username, password } = req.body || {};
     if (!username || !password) return res.status(400).json({ message: "Faltan credenciales" });
 
-    const u = await User.findOne({ username: String(username).toLowerCase(), active: true });
+    const u = await User.findOne({ username: String(username).toLowerCase() });
+    if (!u) {
+  return res.status(401).json({
+    message: "Usuario o contraseña inválidos",
+  });
+}
     if (!u) return res.status(401).json({ message: "Usuario o contraseña inválidos" });
 
-    const ok = await u.checkPassword(password);
+    const ok = await bcrypt.compare(password, u.passwordHash);
     if (!ok) {
       console.warn(`[auth] Intento fallido de login para usuario: ${username} desde IP: ${req.ip}`);
       return res.status(401).json({ message: "Usuario o contraseña inválidos" });

@@ -8,7 +8,6 @@ const cors = require("cors");
 require('dotenv').config();
 
 const helmet = require("helmet");
-const mongoSanitize = require("express-mongo-sanitize");
 const rateLimit = require("express-rate-limit");
 const { ipKeyGenerator } = require("express-rate-limit");
 const productosRoutes = require("./routes/productos");
@@ -17,7 +16,7 @@ const shippingRoutes = require("./routes/shipping");
 const Producto = require("./models/Producto");
 const StatsDaily = require("./models/StatsDaily"); // para syncIndexes
 const { router: authRouter } = require("./routes/auth"); // 👈 Auth JWT
-const xss = require("xss-clean");
+
 
 
 mongoose.set("autoIndex", true);
@@ -107,12 +106,9 @@ app.use(
   mongoSanitize({
     replaceWith: "_",
     allowDots: true,
-    onSanitize: ({ req, key }) => {
-      console.warn("[mongo-sanitize] bloqueado:", key);
-    },
   })
 );
-app.use(xss());
+app.use((req, res, next) => next());
 
 // Rate limiting global para endpoints de admin
 const adminLimiter = rateLimit({

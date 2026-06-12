@@ -7,6 +7,8 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 require('dotenv').config();
 
+const helmet = require("helmet");
+const mongoSanitize = require("express-mongo-sanitize");
 const rateLimit = require("express-rate-limit");
 const productosRoutes = require("./routes/productos");
 const paymentsRoutes = require("./routes/payments");
@@ -14,10 +16,20 @@ const shippingRoutes = require("./routes/shipping");
 const Producto = require("./models/Producto");
 const StatsDaily = require("./models/StatsDaily"); // para syncIndexes
 const { router: authRouter } = require("./routes/auth"); // 👈 Auth JWT
+const xss = require("xss-clean");
 
 mongoose.set("autoIndex", true);
 
 const app = express();
+
+
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false,
+  })
+);
+app.disable("x-powered-by");
+app.use(helmet());
 const PORT = process.env.PORT || 3000;
 
 // 💡 Recomendado en producción detrás de proxy (Railway/Render/Nginx)
@@ -41,7 +53,7 @@ const isLocalhost = (origin) =>
 // ✅ IMPORTANTE: CORS options
 const corsOptions = {
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true); // server-to-server/Postman/curl
+    if (!origin) return cb(new Error("CORS no permitido"), false); // server-to-server/Postman/curl
     console.log("[CORS] Origin recibido:", origin);
 
     if (explicitlyAllowed.size > 0) {
@@ -68,8 +80,27 @@ app.use(cors(corsOptions));
 // ✅ 2) Responder preflight SIEMPRE (esto arregla tu error)
 app.options(/.*/, cors(corsOptions));
 
+const suspiciousIPs = new Set();
+
+app.use((req, res, next) => {
+  const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
+
+  if (suspiciousIPs.has(ip)) {
+    return res.status(403).json({ message: "IP bloqueada temporalmente" });
+  }
+
+  next();
+});
+
 // ✅ 3) JSON después de CORS
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({
+  limit: "20mb",
+  strict: true
+}));
+app.use(mongoSanitize());
+app.use(xss());
+app.use(mongoSanitize());
+app.use(xss());
 
 // Rate limiting global para endpoints de admin
 const adminLimiter = rateLimit({
@@ -89,9 +120,24 @@ const strictLimiter = rateLimit({
   keyGenerator: (req) => req.ip || req.headers["x-forwarded-for"] || "unknown",
 });
 app.use("/api/auth", strictLimiter);
-app.use("/api/productos", adminLimiter);
+
+// Solo endpoints sensibles
 app.use("/api/payments", adminLimiter);
 app.use("/api/categories", adminLimiter);
+
+// Admin de productos
+app.use(
+  "/api/productos",
+  (req, res, next) => {
+    const method = req.method.toUpperCase();
+
+    // GET libres para clientes
+    if (method === "GET") return next();
+
+    // POST/PUT/PATCH/DELETE protegidos
+    return adminLimiter(req, res, next);
+  }
+);
 
 app.use("/uploads", express.static("uploads"));
 

@@ -99,6 +99,39 @@ router.post("/", async (req, res) => {
   try {
     const b = req.body || {};
 
+    // Validaciones básicas
+if (!b.nombre || String(b.nombre).trim().length < 2) {
+  return res.status(400).json({
+    message: "El nombre es obligatorio"
+  });
+}
+
+const precioValidado = parsePrecio(b.precio);
+
+if (precioValidado === null || precioValidado < 0) {
+  return res.status(400).json({
+    message: "Precio inválido"
+  });
+}
+
+if (
+  b.stock !== undefined &&
+  (!Number.isFinite(Number(b.stock)) || Number(b.stock) < 0)
+) {
+  return res.status(400).json({
+    message: "Stock inválido"
+  });
+}
+
+if (
+  b.imagenes &&
+  (!Array.isArray(b.imagenes) || b.imagenes.length > 20)
+) {
+  return res.status(400).json({
+    message: "Cantidad de imágenes inválida"
+  });
+}
+
     const precio = b.precio === "" || b.precio === undefined ? 0 : (parsePrecio(b.precio) ?? 0);
 
     const precioOriginal =
@@ -401,6 +434,47 @@ router.put("/:id", async (req, res) => {
     const { id } = req.params;
     const doc = await Producto.findById(id);
     if (!doc) return res.status(404).json({ message: "No encontrado" });
+
+    // Validaciones básicas de actualización
+
+if (
+  req.body.nombre !== undefined &&
+  String(req.body.nombre).trim().length < 2
+) {
+  return res.status(400).json({
+    message: "Nombre inválido",
+  });
+}
+
+if (req.body.precio !== undefined) {
+  const precio = parsePrecio(req.body.precio);
+
+  if (precio === null || precio < 0) {
+    return res.status(400).json({
+      message: "Precio inválido",
+    });
+  }
+}
+
+if (
+  req.body.stock !== undefined &&
+  (!Number.isFinite(Number(req.body.stock)) ||
+    Number(req.body.stock) < 0)
+) {
+  return res.status(400).json({
+    message: "Stock inválido",
+  });
+}
+
+if (
+  req.body.imagenes !== undefined &&
+  (!Array.isArray(req.body.imagenes) ||
+    req.body.imagenes.length > 20)
+) {
+  return res.status(400).json({
+    message: "Cantidad de imágenes inválida",
+  });
+}
 
     // Compat promoActivo/precioPromo
     if (

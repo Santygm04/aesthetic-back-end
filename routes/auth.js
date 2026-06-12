@@ -8,9 +8,17 @@ const User = require("../models/User");
 // para poder recibir <form method="post"> application/x-www-form-urlencoded
 router.use(express.urlencoded({ extended: false }));
 
-const JWT_SECRET = process.env.JWT_SECRET || "cambia-esto";
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error("JWT_SECRET no configurado");
+}
 const JWT_EXPIRES = process.env.JWT_EXPIRES || "7d";
-const ADMIN_SECRET = process.env.ADMIN_SECRET || "";
+const ADMIN_SECRET = process.env.ADMIN_SECRET;
+
+if (!ADMIN_SECRET) {
+  throw new Error("ADMIN_SECRET no configurado");
+}
 
 // ===== Rate limiting login =====
 const loginAttempts = new Map(); // IP -> { count, firstAttempt }
@@ -56,16 +64,49 @@ function clearLoginAttempts(ip) {
 
 // ===== Middleware simple para validar JWT =====
 function authMiddleware(req, res, next) {
-  const hdr = req.headers.authorization || "";
-  if (!hdr.startsWith("Bearer ")) return res.status(401).json({ message: "No autorizado" });
-  const token = hdr.slice(7);
-  try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    req.user = payload;
-    return next();
-  } catch {
-    return res.status(401).json({ message: "Token inválido" });
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    return res.status(401).json({
+      message: "Token requerido",
+    });
   }
+
+  if (!authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({
+      message: "Formato de token inválido",
+    });
+  }
+
+  try {
+    const token = authHeader.substring(7);
+
+    const payload = jwt.verify(token, JWT_SECRET);
+
+    req.user = payload;
+
+    next();
+  } catch (error) {
+    return res.status(401).json({
+      message: "Token inválido o expirado",
+    });
+  }
+}
+
+function adminOnly(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({
+      message: "No autorizado",
+    });
+  }
+
+  if (req.user.role !== "admin") {
+    return res.status(403).json({
+      message: "Permisos insuficientes",
+    });
+  }
+
+  next();
 }
 
 // ===== Helpers admin-secret =====
@@ -489,4 +530,8 @@ router.post("/request-permission", authMiddleware, async (req, res) => {
   }
 });
 
-module.exports = { router, authMiddleware };
+module.exports = {
+  router,
+  authMiddleware,
+  adminOnly,
+};

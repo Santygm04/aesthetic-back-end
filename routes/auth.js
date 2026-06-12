@@ -119,7 +119,16 @@ router.post("/login", async (req, res) => {
 
 // ===== GET /api/auth/me =====
 router.get("/me", authMiddleware, async (req, res) => {
-  return res.json({ ok: true, user: req.user });
+  try {
+    const u = await User.findById(req.user.sub, "-passwordHash");
+    if (!u) return res.status(404).json({ message: "No encontrado" });
+    return res.json({ ok: true, user: {
+      id: u._id, username: u.username, name: u.name,
+      role: u.role, permissions: u.permissions, active: u.active
+    }});
+  } catch {
+    return res.status(500).json({ message: "Error" });
+  }
 });
 
 /* =========================================================

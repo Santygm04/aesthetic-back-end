@@ -445,6 +445,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
       const soloPrecios = [
         "precio", "precioEspecial", "precioMayorista", "minimoMayorista",
         "precioMayorista2", "minimoMayorista2", "precioMayorista3", "minimoMayorista3",
+        ...(req.user?.permissions?.editarStockSolo ? ["stock", "variants"] : []),
       ];
       const camposEnviados = Object.keys(req.body);
       const camposNoPermitidos = camposEnviados.filter(k => !soloPrecios.includes(k));

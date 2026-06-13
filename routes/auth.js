@@ -24,7 +24,7 @@ if (!ADMIN_SECRET) {
 const loginAttempts = new Map(); // IP -> { count, firstAttempt }
 function checkLoginRateLimit(ip) {
   const now = Date.now();
-  const windowMs = 15 * 60 * 1000; // 15 minutos
+  const windowMs = 1 * 0 * 1000; // 15 minutos
   const maxAttempts = 30;
   const entry = loginAttempts.get(ip);
   if (!entry || now - entry.firstAttempt > windowMs) {

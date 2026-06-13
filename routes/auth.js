@@ -25,7 +25,7 @@ const loginAttempts = new Map(); // IP -> { count, firstAttempt }
 function checkLoginRateLimit(ip) {
   const now = Date.now();
   const windowMs = 15 * 60 * 1000; // 15 minutos
-  const maxAttempts = 5;
+  const maxAttempts = 100;
   const entry = loginAttempts.get(ip);
   if (!entry || now - entry.firstAttempt > windowMs) {
     loginAttempts.set(ip, { count: 1, firstAttempt: now });

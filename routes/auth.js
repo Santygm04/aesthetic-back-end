@@ -137,7 +137,7 @@ router.post("/login", async (req, res) => {
     console.info(`[auth] Login exitoso usuario: ${uname}`);
 
     const token = jwt.sign(
-      { sub: String(u._id), username: u.username, role: u.role },
+      { sub: String(u._id), username: u.username, role: u.role, permissions: u.permissions },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES }
     );

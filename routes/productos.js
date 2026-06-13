@@ -96,7 +96,10 @@ const parseOptionalNum = (val) => {
 // -------------------------
 // CREAR PRODUCTO
 // -------------------------
-router.post("/", authMiddleware, adminOnly, async (req, res) => {
+router.post("/", authMiddleware, async (req, res) => {
+  if (req.user.role !== "admin" && !req.user.permissions?.crearProductos) {
+    return res.status(403).json({ message: "Sin permiso para crear productos" });
+  }
   try {
     const b = req.body || {};
 

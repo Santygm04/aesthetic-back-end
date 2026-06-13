@@ -24,8 +24,8 @@ if (!ADMIN_SECRET) {
 const loginAttempts = new Map(); // IP -> { count, firstAttempt }
 function checkLoginRateLimit(ip) {
   const now = Date.now();
-  const windowMs = 1 * 0 * 1000; // 15 minutos
-  const maxAttempts = 30;
+  const windowMs = 15 * 60 * 1000; // 15 minutos
+  const maxAttempts = 5;
   const entry = loginAttempts.get(ip);
   if (!entry || now - entry.firstAttempt > windowMs) {
     loginAttempts.set(ip, { count: 1, firstAttempt: now });
@@ -163,7 +163,18 @@ router.post("/login", async (req, res) => {
       { expiresIn: JWT_EXPIRES }
     );
 
-    return res.json({ ok: true, token });
+    return res.json({
+      ok: true,
+      token,
+      user: {
+        id: u._id,
+        username: u.username,
+        name: u.name,
+        role: u.role,
+        permissions: u.permissions,
+        active: u.active,
+      }
+    });
   } catch (e) {
     console.error("[auth] LOGIN ERROR:", e.message);
     return res.status(500).json({ message: "Error interno login" });
@@ -234,6 +245,9 @@ router.post("/admin/set-credentials", async (req, res) => {
  *     POST /api/auth/admin/reset-form -> procesa el form
  * ========================================================= */
 router.get("/admin-reset", (req, res) => {
+  if (process.env.NODE_ENV === "production") {
+    return res.status(404).json({ message: "Not found" });
+  }
   const html = `<!doctype html>
 <html lang="es">
 <head>

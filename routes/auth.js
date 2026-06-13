@@ -39,28 +39,7 @@ function clearLoginAttempts(ip) {
   loginAttempts.delete(ip);
 }
 
-// ===== Bootstrap opcional del primer admin =====
-(async function ensureFirstAdmin() {
-  try {
-    const u = process.env.ADMIN_DEFAULT_USER;
-    const p = process.env.ADMIN_DEFAULT_PASS;
-    if (!u || !p) return;
 
-    const exists = await User.findOne({ username: u.toLowerCase() });
-    if (exists) return;
-
-    const hash = await bcrypt.hash(p, 10);
-    await User.create({
-      username: u.toLowerCase(),
-      name: "Administrador",
-      role: "admin",
-      passwordHash: hash,
-    });
-    console.log(`[auth] Admin creado: ${u}`);
-  } catch (e) {
-    console.warn("[auth] Bootstrap admin error:", e.message);
-  }
-})();
 
 // ===== Middleware simple para validar JWT =====
 function authMiddleware(req, res, next) {

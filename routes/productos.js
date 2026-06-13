@@ -443,9 +443,12 @@ router.put("/:id", authMiddleware, async (req, res) => {
     const isVendedor = req.user?.role === "vendedor";
     if (isVendedor) {
       const soloPrecios = [
-        "precio", "precioEspecial", "precioMayorista", "minimoMayorista",
-        "precioMayorista2", "minimoMayorista2", "precioMayorista3", "minimoMayorista3",
-        ...(req.user?.permissions?.editarStockSolo ? ["stock", "variants"] : []),
+        "precio", "precioEspecial", "precioMayorista",
+        "precioMayorista2", "precioMayorista3",
+        "nombre", "descripcion", "categoria", "subcategoria",
+        "imagenes", "imagen", "variants", "destacado", "tags",
+        "cantidadTonos", "modoTonos", "tonosDisponibles",
+        ...(req.user?.permissions?.editarStockSolo ? ["stock", "minimoMayorista", "minimoMayorista2", "minimoMayorista3"] : []),
       ];
       const camposEnviados = Object.keys(req.body);
       const camposNoPermitidos = camposEnviados.filter(k => !soloPrecios.includes(k));

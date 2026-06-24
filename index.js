@@ -192,11 +192,7 @@ app.use((err, req, res, next) => {
 
 /* ============ Healthcheck simple ============ */
 app.get("/health", (req, res) => {
-  res.json({
-    ok: true,
-    env: process.env.NODE_ENV || "development",
-    db: mongoose?.connection?.readyState === 1 ? "up" : "down",
-  });
+  res.json({ ok: true });
 });
 
 /* ============ RUTAS ============ */

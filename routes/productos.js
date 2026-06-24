@@ -314,6 +314,16 @@ router.get("/promos", async (req, res) => {
     const priceDrop = { $expr: { $gt: ["$precioOriginal", "$precio"] } };
     const query = withVis(req, { $or: [promoActiveWindow, priceDrop] });
     const items = await Producto.find(query).sort({ updatedAt: -1, createdAt: -1 }).limit(limitNum).lean();
+    if (!isAdminReq(req)) {
+      return res.json(items.map(p => {
+        const obj = { ...p };
+        delete obj.precioMayorista; delete obj.minimoMayorista;
+        delete obj.precioMayorista2; delete obj.minimoMayorista2;
+        delete obj.precioMayorista3; delete obj.minimoMayorista3;
+        delete obj.precioEspecial;
+        return obj;
+      }));
+    }
     res.json(items);
   } catch (e) {
     console.error("GET /promos ERROR:", e);
@@ -345,7 +355,15 @@ router.get("/search", async (req, res) => {
       Producto.countDocuments(filter),
     ]);
 
-    res.json({ items, page: pageNum, pages: Math.max(1, Math.ceil(total / limitNum)), total, q: queryString });
+    const sanitizedItems = !isAdminReq(req) ? items.map(p => {
+      const obj = p.toObject();
+      delete obj.precioMayorista; delete obj.minimoMayorista;
+      delete obj.precioMayorista2; delete obj.minimoMayorista2;
+      delete obj.precioMayorista3; delete obj.minimoMayorista3;
+      delete obj.precioEspecial;
+      return obj;
+    }) : items;
+    res.json({ items: sanitizedItems, page: pageNum, pages: Math.max(1, Math.ceil(total / limitNum)), total, q: queryString });
   } catch (e) {
     console.error("GET /search ERROR:", e);
     res.status(500).json({ message: "Error en búsqueda" });
@@ -425,6 +443,16 @@ router.get("/", async (req, res) => {
     };
     const limitNum = Math.max(1, Math.min(200, toInt(limit, 100)));
     const items = await Producto.find(query).sort(sortMap[sort] || sortMap["fecha-desc"]).limit(limitNum);
+    if (!isAdminReq(req)) {
+      return res.json(items.map(p => {
+        const obj = p.toObject();
+        delete obj.precioMayorista; delete obj.minimoMayorista;
+        delete obj.precioMayorista2; delete obj.minimoMayorista2;
+        delete obj.precioMayorista3; delete obj.minimoMayorista3;
+        delete obj.precioEspecial;
+        return obj;
+      }));
+    }
     res.json(items);
   } catch (e) {
     console.error("GET / (lista) ERROR:", e);
@@ -628,6 +656,14 @@ router.get("/:id", async (req, res) => {
     });
     if (!p) return res.status(404).json({ message: "No encontrado" });
     if (!isAdminReq(req) && p.visible === false) return res.status(404).json({ message: "No encontrado" });
+    if (!isAdminReq(req)) {
+      const obj = p.toObject();
+      delete obj.precioMayorista; delete obj.minimoMayorista;
+      delete obj.precioMayorista2; delete obj.minimoMayorista2;
+      delete obj.precioMayorista3; delete obj.minimoMayorista3;
+      delete obj.precioEspecial;
+      return res.json(obj);
+    }
     res.json(p);
   } catch (e) {
     console.error("GET /:id ERROR:", e);

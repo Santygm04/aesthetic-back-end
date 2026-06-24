@@ -3,6 +3,7 @@ const { sendOrderConfirmation, sendPaymentConfirmed } = require('../lib/emailSer
 const express = require("express");
 const router = express.Router();
 const fs = require("fs");
+const rateLimit = require("express-rate-limit");
 const path = require("path");
 const multer = require("multer");
 const axios = require("axios");
@@ -35,7 +36,15 @@ fs.mkdirSync(UP_DIR, { recursive: true });
 
 const upload = multer({
   dest: UP_DIR,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Tipo de archivo no permitido. Solo JPG, PNG, WEBP o PDF."));
+    }
+  }
 });
 
 /* ===========================
@@ -52,7 +61,7 @@ const WSP_TEMPLATE_LANG = process.env.WHATSAPP_TEMPLATE_LANG || "es_AR";
 
 // Admin / Webhook secrets
 const ADMIN_SECRET = (process.env.ADMIN_SECRET || "").trim();
-const BANK_WEBHOOK_SECRET = process.envBANK_WEBHOOK_SECRET || process.env.BANK_WEBHOOK_SECRET || "";
+const BANK_WEBHOOK_SECRET = process.env.BANK_WEBHOOK_SECRET || "";
 const JWT_SECRET = process.env.JWT_SECRET || "cambia-esto"; // 👈 NUEVO
 
 /* ============ utils ============ */
@@ -278,6 +287,9 @@ function resolveBackBase(req) {
  *  DEBUG
  * =========================== */
 router.get("/debug", (req, res) => {
+  if (process.env.NODE_ENV === "production") {
+    return res.status(404).json({ message: "Not found" });
+  }
   return res.json({
     ok: true,
     resolvedFrontBase: resolveFrontBase(req),
@@ -425,8 +437,32 @@ router.post("/transfer", upload.single("comprobante"), async (req, res) => {
       return res.status(400).json({ ok: false, message: "Items requeridos" });
     }
 
+    // ✅ Validar precio y stock contra la base de datos
+    const productIds = normalizedItems.filter(it => it.productId).map(it => it.productId);
+    if (productIds.length) {
+      const productosDB = await Producto.find(
+        { _id: { $in: productIds } },
+        { precio: 1, precioMayorista: 1, precioMayorista2: 1, precioMayorista3: 1, stock: 1, nombre: 1 }
+      ).lean();
+      const mapDB = {};
+      productosDB.forEach(p => { mapDB[String(p._id)] = p; });
+      for (const item of normalizedItems) {
+        const db = mapDB[String(item.productId)];
+        if (!db) continue;
+        const precios = [db.precio, db.precioMayorista, db.precioMayorista2, db.precioMayorista3]
+          .filter(p => p != null && p > 0);
+        const precioMinimo = precios.length ? Math.min(...precios) : 0;
+        if (precioMinimo > 0 && item.precio < precioMinimo * 0.9) {
+          return res.status(400).json({ ok: false, message: `Precio inválido para ${item.nombre}` });
+        }
+        if (item.cantidad > db.stock) {
+          return res.status(400).json({ ok: false, message: `Stock insuficiente para ${item.nombre}. Disponible: ${db.stock}` });
+        }
+      }
+    }
+
     // ✅ Debug (1 minuto): sacalo después
-    const DEBUG = true;
+    const DEBUG = process.env.NODE_ENV !== "production";
     if (DEBUG) {
       console.log("[/transfer] total recibido raw:", receivedTotalRaw);
       console.log("[/transfer] total recibido parsed:", receivedTotal);
@@ -560,6 +596,30 @@ router.post("/mp/create-preference", async (req, res) => {
     : undefined,
 };
     });
+
+    // ✅ Validar precio y stock contra la base de datos
+    const productIdsMp = normalizedItems.filter(it => it.productId).map(it => it.productId);
+    if (productIdsMp.length) {
+      const productosDBMp = await Producto.find(
+        { _id: { $in: productIdsMp } },
+        { precio: 1, precioMayorista: 1, precioMayorista2: 1, precioMayorista3: 1, stock: 1, nombre: 1 }
+      ).lean();
+      const mapDBMp = {};
+      productosDBMp.forEach(p => { mapDBMp[String(p._id)] = p; });
+      for (const item of normalizedItems) {
+        const db = mapDBMp[String(item.productId)];
+        if (!db) continue;
+        const precios = [db.precio, db.precioMayorista, db.precioMayorista2, db.precioMayorista3]
+          .filter(p => p != null && p > 0);
+        const precioMinimo = precios.length ? Math.min(...precios) : 0;
+        if (precioMinimo > 0 && item.precio < precioMinimo * 0.9) {
+          return res.status(400).json({ ok: false, message: `Precio inválido para ${item.nombre}` });
+        }
+        if (item.cantidad > db.stock) {
+          return res.status(400).json({ ok: false, message: `Stock insuficiente para ${item.nombre}. Disponible: ${db.stock}` });
+        }
+      }
+    }
 
     // ✅ total REAL desde items
     const computedTotal = Number(
@@ -758,9 +818,6 @@ function isAdmin(req) {
   const fromHeader = (req.headers["x-admin-secret"] || "").trim();
   const fromBody = (req.body?.secret || "").trim();
   const s = fromHeader || fromBody;
-  console.log("[isAdmin] secret recibido:", JSON.stringify(s));
-  console.log("[isAdmin] ADMIN_SECRET en env:", JSON.stringify(ADMIN_SECRET));
-  console.log("[isAdmin] coinciden:", s === ADMIN_SECRET);
   if (!ADMIN_SECRET) {
     console.warn("[isAdmin] ADVERTENCIA: ADMIN_SECRET está vacío en el entorno");
     return false;
@@ -1082,7 +1139,15 @@ router.get("/orders/public/lookup", async (req, res) => {
 /* =========================================================
  *  PÚBLICO: buscar órdenes por email, teléfono o DNI
  * ========================================================= */
-router.get("/orders/public/by-buyer", async (req, res) => {
+const publicLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, message: "Demasiadas búsquedas, esperá unos minutos" }
+});
+
+router.get("/orders/public/by-buyer", publicLimiter, async (req, res) => {
   try {
     const email = String(req.query.email || "").trim();
     const phone = String(req.query.phone || "").replace(/\D/g, "");
